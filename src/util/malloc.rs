@@ -9,9 +9,13 @@ pub use mimalloc_sys::{
 #[cfg(feature = "malloc_hoard")]
 pub use hoard_sys::{calloc, free, malloc_usable_size};
 
+#[cfg(feature = "malloc_scalloc")]
+pub use scalloc_sys::{calloc, free, malloc_usable_size};
+
 #[cfg(not(any(
     feature = "malloc_jemalloc",
     feature = "malloc_mimalloc",
     feature = "malloc_hoard",
+    feature = "malloc_scalloc"
 )))]
 pub use libc::{calloc, free, malloc_usable_size};

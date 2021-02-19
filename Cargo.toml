@@ -23,6 +23,7 @@ libc = "0.2"
 jemalloc-sys = {version = "0.3.2", features = ["disable_initial_exec_tls"] }
 mimalloc-sys = "0.1.6"
 hoard-sys = { git = "https://git@github.com/paigereeves/hoard-sys.git", rev = "36989b877962f086267b1d21d5008c9df0fd0984" }
+scalloc-sys = { path = "../scalloc-sys" }
 lazy_static = "1.1"
 log = {version = "0.4", features = ["max_level_trace", "release_max_level_off"] }
 crossbeam-deque = "0.6"
@@ -39,7 +40,7 @@ crossbeam = "0.7.3"
 rand = "0.7.3"
 
 [features]
-default = []
+default = ["malloc_scalloc"]
 
 # .github/scripts/ci-common.sh extracts features from the following part (including from comments).
 # So be careful when editing or adding stuff to the section below.
@@ -74,6 +75,7 @@ single_worker = []
 malloc_mimalloc = []
 malloc_jemalloc = []
 malloc_hoard = []
+malloc_scalloc = []
 
 # If there are more groups, they should be inserted above this line
 # Group:end
