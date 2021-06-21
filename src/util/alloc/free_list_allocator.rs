@@ -8,17 +8,19 @@ pub struct FreeListAllocator<VM: VMBinding> {
     pub tls: VMThread,
     space: &'static MarkSweepSpace<VM>,
     plan: &'static dyn Plan<VM = VM>,
-    available_blocks: Vec<Address>,
+    available_blocks: HashMap<SizeClass, LinkedList<Block>>,
+    exhausted_blocks: HashMap<SizeClass, LinkedList<Block>>,
+    free_lists: HashMap<Block, Vec<Block>>,
   }
   
-//   type SizeClass = usize;
-//   type BlockList = HashMap<SizeClass, LinkedList<Block>>;
-//   type FreeList = LinkedList<Address>;
-//   type Block = Address;
+  type SizeClass = usize;
+  type Block = Address;
 
-struct Blocks {
-    available_blocks: HashMap<Address, Address>,
-}
+// struct Blocks {
+//     available_blocks: HashMap<SizeClass, LinkedList<Block>>,
+//     exhausted_blocks: HashMap<SizeClass, LinkedList<Block>>,
+//     free_lists: HashMap<Block, Vec<Block>>,
+// }
 
 impl<VM: VMBinding> Allocator<VM> for FreeListAllocator<VM> {
     fn get_tls(&self) -> VMThread {
@@ -52,7 +54,9 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
             tls,
             space,
             plan,
-            available_blocks: vec![]
+            available_blocks: HashMap::new(),
+            exhausted_blocks: HashMap::new(),
+            free_lists: HashMap::new(),
         };
         allocator
     }
