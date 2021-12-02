@@ -76,9 +76,19 @@ pub(crate) const ACTIVE_PAGE_METADATA_SPEC: SideMetadataSpec = SideMetadataSpec 
     log_min_obj_size: constants::LOG_BYTES_IN_PAGE as usize,
 };
 
-pub fn is_meta_space_mapped(address: Address) -> bool {
-    let chunk_start = conversions::chunk_align_down(address);
-    is_chunk_mapped(chunk_start) && is_chunk_marked(chunk_start)
+/// Check if metadata is mapped for a range [addr, addr + size). Metadata is mapped per chunk,
+/// we will go through all the chunks for [address, address + size), and check if they are mapped.
+/// If any of the chunks is not mapped, return false. Otherwise return true.
+#[cfg(feature="malloc")]
+pub fn is_meta_space_mapped(address: Address, size: usize) -> bool {
+    let mut chunk = conversions::chunk_align_down(address);
+    while chunk < address + size {
+        if !is_meta_space_mapped_for_address(chunk) {
+            return false;
+        }
+        chunk += BYTES_IN_CHUNK;
+    }
+    true
 }
 
 // Eagerly map the active chunk metadata surrounding `chunk_start`

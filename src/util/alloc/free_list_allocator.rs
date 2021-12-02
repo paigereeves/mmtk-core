@@ -5,15 +5,10 @@ use crate::policy::marksweepspace::block::Block;
 use crate::policy::marksweepspace::metadata::is_marked;
 use crate::policy::marksweepspace::MarkSweepSpace;
 use crate::policy::space::Space;
-use crate::util::alloc_bit::{is_alloced, set_alloc_bit, unset_alloc_bit_unsafe};
+use crate::util::alloc_bit::{is_alloced, unset_alloc_bit_unsafe};
 use crate::util::constants::LOG_BYTES_IN_PAGE;
-use crate::util::heap::layout::FragmentedMapper;
-use crate::util::metadata::load_metadata;
-use crate::util::metadata::store_metadata;
-use crate::util::metadata::MetadataSpec;
 use crate::util::alloc::Allocator;
 use crate::util::Address;
-use crate::util::OpaquePointer;
 use crate::util::VMThread;
 use crate::vm::VMBinding;
 use crate::Plan;
@@ -30,6 +25,7 @@ const MI_BIN_FULL: usize = MI_BIN_HUGE + 1;
 const ZERO_BLOCK: Block = Block::from(unsafe { Address::zero() });
 
 // mimalloc init.c:46
+#[cfg(not(feature="malloc"))]
 pub(crate) const BLOCK_LISTS_EMPTY: [BlockList; MI_BIN_HUGE + 1] = [
     BlockList::new(1 * 4),
     BlockList::new(1 * 4),
@@ -106,24 +102,26 @@ pub(crate) const BLOCK_LISTS_EMPTY: [BlockList; MI_BIN_HUGE + 1] = [
     BlockList::new(524288 * 4), /* 72 */
     BlockList::new(MI_LARGE_OBJ_WSIZE_MAX + 1 /* 655360, Huge queue */),
 ];
-
+#[cfg(not(feature="malloc"))]
 pub struct FreeListAllocator<VM: VMBinding> {
     pub tls: VMThread,
     space: &'static MarkSweepSpace<VM>,
     plan: &'static dyn Plan<VM = VM>,
     available_blocks: Vec<BlockList>, // = pages in mimalloc
-    #[cfg(feature = "lazy_sweeping")]
+    #[cfg(not(feature = "eager_sweeping"))]
     unswept_blocks: Vec<BlockList>,
     consumed_blocks: Vec<BlockList>,
 }
 
 #[derive(Clone, Debug)]
+#[cfg(not(feature="malloc"))]
 pub struct BlockList {
     pub first: Block,
     pub last: Block,
     size: usize,
 }
 
+#[cfg(not(feature="malloc"))]
 impl BlockList {
     const fn new(size: usize) -> BlockList {
         BlockList {
@@ -227,8 +225,10 @@ impl BlockList {
     }
 }
 
+#[cfg(not(feature="malloc"))]
 unsafe impl<VM: VMBinding> Send for FreeListAllocator<VM> {}
 
+#[cfg(not(feature="malloc"))]
 impl<VM: VMBinding> Allocator<VM> for FreeListAllocator<VM> {
     fn get_tls(&self) -> VMThread {
         self.tls
@@ -287,16 +287,11 @@ impl<VM: VMBinding> Allocator<VM> for FreeListAllocator<VM> {
         block.store_free_list::<VM>(next_cell);
         debug_assert!(block.load_free_list::<VM>() == next_cell);
 
-        // set allocation bit
-        set_alloc_bit(unsafe { free_list.to_object_reference() });
-        debug_assert!(is_alloced(unsafe { free_list.to_object_reference() }));
-        // // eprintln!("a {}", free_list);
-        // eprintln!("end alloc slow once");
-
         free_list
     }
 }
 
+#[cfg(not(feature="malloc"))]
 impl<VM: VMBinding> FreeListAllocator<VM> {
     pub fn new(
         tls: VMThread,
@@ -308,7 +303,7 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
             space,
             plan,
             available_blocks: BLOCK_LISTS_EMPTY.to_vec(),
-            #[cfg(feature = "lazy_sweeping")]
+            #[cfg(not(feature = "eager_sweeping"))]
             unswept_blocks: BLOCK_LISTS_EMPTY.to_vec(),
             consumed_blocks: BLOCK_LISTS_EMPTY.to_vec(),
         }
@@ -330,9 +325,6 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
                 let next_cell = unsafe { free_list.load::<Address>() };
                 block.store_free_list::<VM>(next_cell);
                 debug_assert!(block.load_free_list::<VM>() == next_cell);
-                // set allocation bit
-                set_alloc_bit(unsafe { free_list.to_object_reference() });
-                debug_assert!(is_alloced(unsafe { free_list.to_object_reference() }));
 
                 return free_list;
             }
@@ -415,7 +407,7 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
         debug_assert!(self.available_blocks[bin].is_empty()); // only use this function if there are no blocks available
 
         // attempt to sweep
-        #[cfg(feature = "lazy_sweeping")]
+        #[cfg(not(any(feature = "eager_sweeping", feature = "malloc")))]
         loop {
             let block = self.unswept_blocks.get_mut(bin).unwrap().pop::<VM>();
             if block.is_zero() {
@@ -538,7 +530,7 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
         block.store_tls::<VM>(self.tls);
     }
 
-    #[cfg(feature = "lazy_sweeping")]
+    #[cfg(not(feature = "eager_sweeping"))]
     pub fn reset(&mut self) {
         trace!("reset");
         // consumed and available are now unswept
@@ -553,7 +545,7 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
         }
     }
 
-    #[cfg(not(feature = "lazy_sweeping"))]
+    #[cfg(feature = "eager_sweeping")]
     pub fn reset(&mut self) {
         trace!("reset");
         // sweep all blocks and push consumed onto available list

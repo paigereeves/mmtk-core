@@ -1,3 +1,4 @@
+
 use crate::mmtk::MMTK;
 use crate::plan::freelistmarksweep::mutator::ALLOCATOR_MAPPING;
 use crate::plan::global::{BasePlan, CommonPlan, NoCopy};
@@ -31,6 +32,8 @@ use enum_map::EnumMap;
 use std::sync::Arc;
 
 use super::gc_work::FLMSProcessEdges;
+
+#[cfg(not(feature="malloc"))]
 
 pub struct FreeListMarkSweep<VM: VMBinding> {
     pub common: CommonPlan<VM>,

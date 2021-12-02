@@ -18,8 +18,10 @@ use std::{iter::Step, ops::Range};
 /// Data structure to reference a MMTk 4 MB chunk.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq)]
+#[cfg(not(feature="malloc"))]
 pub struct Chunk(Address);
 
+#[cfg(not(feature="malloc"))]
 impl Chunk {
     /// Chunk constant with zero address
     const ZERO: Self = Self(Address::ZERO);
@@ -82,6 +84,7 @@ impl Chunk {
     }
 }
 
+#[cfg(not(feature="malloc"))]
 unsafe impl Step for Chunk {
     /// Get the number of chunks between the given two chunks.
     #[inline(always)]
@@ -122,6 +125,7 @@ unsafe impl Step for Chunk {
 /// Chunk allocation state
 #[repr(u8)]
 #[derive(Debug, PartialEq, Clone, Copy)]
+#[cfg(not(feature="malloc"))]
 pub enum ChunkState {
     /// The chunk is not allocated.
     Free = 0,
@@ -130,10 +134,12 @@ pub enum ChunkState {
 }
 
 /// A byte-map to record all the allocated chunks
+#[cfg(not(feature="malloc"))]
 pub struct ChunkMap {
     chunk_range: Mutex<Range<Chunk>>,
 }
 
+#[cfg(not(feature="malloc"))]
 impl ChunkMap {
     /// Chunk alloc table
     pub const ALLOC_TABLE: SideMetadataSpec = SideMetadataSpec {
@@ -212,11 +218,13 @@ impl ChunkMap {
 }
 
 /// Chunk sweeping work packet.
+#[cfg(not(feature="malloc"))]
 struct SweepChunk<VM: VMBinding> {
     space: &'static MarkSweepSpace<VM>,
     chunk: Chunk,
 }
 
+#[cfg(not(feature="malloc"))]
 impl<VM: VMBinding> GCWork<VM> for SweepChunk<VM> {
     #[inline]
     fn do_work(&mut self, _worker: &mut GCWorker<VM>, _mmtk: &'static MMTK<VM>) {

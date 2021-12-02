@@ -4,15 +4,19 @@ use std::iter::Step;
 
 use atomic::Ordering;
 
+#[cfg(not(feature="malloc"))]
 use crate::{util::{Address, OpaquePointer, alloc::free_list_allocator::{self, BYTES_IN_BLOCK, BlockList, FreeListAllocator, LOG_BYTES_IN_BLOCK}, metadata::{MetadataSpec, load_metadata, side_metadata::{
                 self, SideMetadataOffset, SideMetadataSpec, LOCAL_SIDE_METADATA_BASE_OFFSET,
             }, store_metadata}, VMThread, alloc_bit::is_alloced}, vm::VMBinding, policy::marksweepspace::metadata::is_marked};
 
+            #[cfg(not(feature="malloc"))]
 use super::{MARKSWEEP_LOCAL_SIDE_METADATA_BASE_OFFSET, MarkSweepSpace, chunks::Chunk};
 
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq)]
+#[cfg(not(feature="malloc"))]
 pub struct Block(Address);
 
+#[cfg(not(feature="malloc"))]
 impl Block {
     /// Align the address to a block boundary.
     pub const fn align(address: Address) -> Address {
@@ -374,6 +378,7 @@ impl Block {
     }
 }
 
+#[cfg(not(feature="malloc"))]
 unsafe impl Step for Block {
     /// Get the number of blocks between the given two blocks.
     #[inline(always)]
@@ -412,6 +417,7 @@ unsafe impl Step for Block {
     }
 }
 /// The block allocation state.
+#[cfg(not(feature="malloc"))]
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum BlockState {
     /// the block is not allocated.
@@ -424,6 +430,7 @@ pub enum BlockState {
     UnmarkedAcknowledged,
 }
 
+#[cfg(not(feature="malloc"))]
 impl BlockState {
     /// Private constant
     const MARK_UNALLOCATED: u8 = 0;
@@ -435,6 +442,7 @@ impl BlockState {
     const MARK_UNMARKED_ACKNOWLEDGED: u8 = u8::MAX - 2;
 }
 
+#[cfg(not(feature="malloc"))]
 impl From<u8> for BlockState {
     #[inline(always)]
     fn from(state: u8) -> Self {
@@ -448,6 +456,7 @@ impl From<u8> for BlockState {
     }
 }
 
+#[cfg(not(feature="malloc"))]
 impl From<BlockState> for u8 {
     #[inline(always)]
     fn from(state: BlockState) -> Self {
