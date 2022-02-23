@@ -7,7 +7,6 @@ use crate::policy::marksweepspace::block::Block;
 use crate::policy::marksweepspace::metadata::is_marked;
 use crate::policy::marksweepspace::MarkSweepSpace;
 use crate::policy::space::Space;
-use crate::util::alloc_bit::{is_alloced, set_alloc_bit, unset_alloc_bit_unsafe};
 use crate::util::constants::LOG_BYTES_IN_PAGE;
 use crate::util::alloc::Allocator;
 use crate::util::Address;
@@ -15,6 +14,7 @@ use crate::util::VMThread;
 use crate::vm::VMBinding;
 use crate::vm::ActivePlan;
 use crate::Plan;
+use libc::c_void;
 
 const MI_BIN_HUGE: usize = 73;
 const MI_INTPTR_SHIFT: usize = 3;
@@ -24,83 +24,86 @@ pub const MI_LARGE_OBJ_WSIZE_MAX: usize = MI_LARGE_OBJ_SIZE_MAX / MI_INTPTR_SIZE
 const MI_INTPTR_BITS: usize = MI_INTPTR_SIZE * 8;
 pub const MI_BIN_FULL: usize = MI_BIN_HUGE + 1;
 const ZERO_BLOCK: Block = Block::from(unsafe { Address::zero() });
+pub const MI_SMALL_WSIZE_MAX: usize = 128;
+pub const MI_SMALL_SIZE_MAX: usize = MI_SMALL_WSIZE_MAX * size_of::<c_void>();
+pub const MI_BLOCKS_DIRECT: usize = MI_SMALL_WSIZE_MAX + 1;
 pub type BlockLists = [BlockList; MI_BIN_HUGE + 1];
 
 // mimalloc init.c:46
 pub(crate) const BLOCK_LISTS_EMPTY: BlockLists = [
-    BlockList::new(1 * 4),
-    BlockList::new(1 * 4),
-    BlockList::new(2 * 4),
-    BlockList::new(3 * 4),
-    BlockList::new(4 * 4),
-    BlockList::new(5 * 4),
-    BlockList::new(6 * 4),
-    BlockList::new(7 * 4),
-    BlockList::new(8 * 4), /* 8 */
-    BlockList::new(10 * 4),
-    BlockList::new(12 * 4),
-    BlockList::new(14 * 4),
-    BlockList::new(16 * 4),
-    BlockList::new(20 * 4),
-    BlockList::new(24 * 4),
-    BlockList::new(28 * 4),
-    BlockList::new(32 * 4), /* 16 */
-    BlockList::new(40 * 4),
-    BlockList::new(48 * 4),
-    BlockList::new(56 * 4),
-    BlockList::new(64 * 4),
-    BlockList::new(80 * 4),
-    BlockList::new(96 * 4),
-    BlockList::new(112 * 4),
-    BlockList::new(128 * 4), /* 24 */
-    BlockList::new(160 * 4),
-    BlockList::new(192 * 4),
-    BlockList::new(224 * 4),
-    BlockList::new(256 * 4),
-    BlockList::new(320 * 4),
-    BlockList::new(384 * 4),
-    BlockList::new(448 * 4),
-    BlockList::new(512 * 4), /* 32 */
-    BlockList::new(640 * 4),
-    BlockList::new(768 * 4),
-    BlockList::new(896 * 4),
-    BlockList::new(1024 * 4),
-    BlockList::new(1280 * 4),
-    BlockList::new(1536 * 4),
-    BlockList::new(1792 * 4),
-    BlockList::new(2048 * 4), /* 40 */
-    BlockList::new(2560 * 4),
-    BlockList::new(3072 * 4),
-    BlockList::new(3584 * 4),
-    BlockList::new(4096 * 4),
-    BlockList::new(5120 * 4),
-    BlockList::new(6144 * 4),
-    BlockList::new(7168 * 4),
-    BlockList::new(8192 * 4), /* 48 */
-    BlockList::new(10240 * 4),
-    BlockList::new(12288 * 4),
-    BlockList::new(14336 * 4),
-    BlockList::new(16384 * 4),
-    BlockList::new(20480 * 4),
-    BlockList::new(24576 * 4),
-    BlockList::new(28672 * 4),
-    BlockList::new(32768 * 4), /* 56 */
-    BlockList::new(40960 * 4),
-    BlockList::new(49152 * 4),
-    BlockList::new(57344 * 4),
-    BlockList::new(65536 * 4),
-    BlockList::new(81920 * 4),
-    BlockList::new(98304 * 4),
-    BlockList::new(114688 * 4),
-    BlockList::new(131072 * 4), /* 64 */
-    BlockList::new(163840 * 4),
-    BlockList::new(196608 * 4),
-    BlockList::new(229376 * 4),
-    BlockList::new(262144 * 4),
-    BlockList::new(327680 * 4),
-    BlockList::new(393216 * 4),
-    BlockList::new(458752 * 4),
-    BlockList::new(524288 * 4), /* 72 */
+    BlockList::new(1 * MI_INTPTR_SIZE),
+    BlockList::new(1 * MI_INTPTR_SIZE),
+    BlockList::new(2 * MI_INTPTR_SIZE),
+    BlockList::new(3 * MI_INTPTR_SIZE),
+    BlockList::new(4 * MI_INTPTR_SIZE),
+    BlockList::new(5 * MI_INTPTR_SIZE),
+    BlockList::new(6 * MI_INTPTR_SIZE),
+    BlockList::new(7 * MI_INTPTR_SIZE),
+    BlockList::new(8 * MI_INTPTR_SIZE), /* 8 */
+    BlockList::new(10 * MI_INTPTR_SIZE),
+    BlockList::new(12 * MI_INTPTR_SIZE),
+    BlockList::new(14 * MI_INTPTR_SIZE),
+    BlockList::new(16 * MI_INTPTR_SIZE),
+    BlockList::new(20 * MI_INTPTR_SIZE),
+    BlockList::new(24 * MI_INTPTR_SIZE),
+    BlockList::new(28 * MI_INTPTR_SIZE),
+    BlockList::new(32 * MI_INTPTR_SIZE), /* 16 */
+    BlockList::new(40 * MI_INTPTR_SIZE),
+    BlockList::new(48 * MI_INTPTR_SIZE),
+    BlockList::new(56 * MI_INTPTR_SIZE),
+    BlockList::new(64 * MI_INTPTR_SIZE),
+    BlockList::new(80 * MI_INTPTR_SIZE),
+    BlockList::new(96 * MI_INTPTR_SIZE),
+    BlockList::new(112 * MI_INTPTR_SIZE),
+    BlockList::new(128 * MI_INTPTR_SIZE), /* 24 */
+    BlockList::new(160 * MI_INTPTR_SIZE),
+    BlockList::new(192 * MI_INTPTR_SIZE),
+    BlockList::new(224 * MI_INTPTR_SIZE),
+    BlockList::new(256 * MI_INTPTR_SIZE),
+    BlockList::new(320 * MI_INTPTR_SIZE),
+    BlockList::new(384 * MI_INTPTR_SIZE),
+    BlockList::new(448 * MI_INTPTR_SIZE),
+    BlockList::new(512 * MI_INTPTR_SIZE), /* 32 */
+    BlockList::new(640 * MI_INTPTR_SIZE),
+    BlockList::new(768 * MI_INTPTR_SIZE),
+    BlockList::new(896 * MI_INTPTR_SIZE),
+    BlockList::new(1024 * MI_INTPTR_SIZE),
+    BlockList::new(1280 * MI_INTPTR_SIZE),
+    BlockList::new(1536 * MI_INTPTR_SIZE),
+    BlockList::new(1792 * MI_INTPTR_SIZE),
+    BlockList::new(2048 * MI_INTPTR_SIZE), /* MI_INTPTR_SIZE0 */
+    BlockList::new(2560 * MI_INTPTR_SIZE),
+    BlockList::new(3072 * MI_INTPTR_SIZE),
+    BlockList::new(3584 * MI_INTPTR_SIZE),
+    BlockList::new(4096 * MI_INTPTR_SIZE),
+    BlockList::new(5120 * MI_INTPTR_SIZE),
+    BlockList::new(6144 * MI_INTPTR_SIZE),
+    BlockList::new(7168 * MI_INTPTR_SIZE),
+    BlockList::new(8192 * MI_INTPTR_SIZE), /* MI_INTPTR_SIZE8 */
+    BlockList::new(10240 * MI_INTPTR_SIZE),
+    BlockList::new(12288 * MI_INTPTR_SIZE),
+    BlockList::new(14336 * MI_INTPTR_SIZE),
+    BlockList::new(16384 * MI_INTPTR_SIZE),
+    BlockList::new(20480 * MI_INTPTR_SIZE),
+    BlockList::new(24576 * MI_INTPTR_SIZE),
+    BlockList::new(28672 * MI_INTPTR_SIZE),
+    BlockList::new(32768 * MI_INTPTR_SIZE), /* 56 */
+    BlockList::new(40960 * MI_INTPTR_SIZE),
+    BlockList::new(49152 * MI_INTPTR_SIZE),
+    BlockList::new(57344 * MI_INTPTR_SIZE),
+    BlockList::new(65536 * MI_INTPTR_SIZE),
+    BlockList::new(81920 * MI_INTPTR_SIZE),
+    BlockList::new(98304 * MI_INTPTR_SIZE),
+    BlockList::new(114688 * MI_INTPTR_SIZE),
+    BlockList::new(131072 * MI_INTPTR_SIZE), /* 64 */
+    BlockList::new(163840 * MI_INTPTR_SIZE),
+    BlockList::new(196608 * MI_INTPTR_SIZE),
+    BlockList::new(229376 * MI_INTPTR_SIZE),
+    BlockList::new(262144 * MI_INTPTR_SIZE),
+    BlockList::new(327680 * MI_INTPTR_SIZE),
+    BlockList::new(393216 * MI_INTPTR_SIZE),
+    BlockList::new(458752 * MI_INTPTR_SIZE),
+    BlockList::new(524288 * MI_INTPTR_SIZE), /* 72 */
     BlockList::new(MI_LARGE_OBJ_WSIZE_MAX + 1 /* 655360, Huge queue */),
 ];
 
@@ -114,6 +117,7 @@ pub struct FreeListAllocator<VM: VMBinding> {
     pub available_blocks_stress: BlockLists,
     pub unswept_blocks: BlockLists,
     pub consumed_blocks: BlockLists,
+    pub blocks_free_direct: [Block; MI_BLOCKS_DIRECT],
 }
 
 #[derive(Debug)]
@@ -200,12 +204,12 @@ impl BlockList {
     
     pub fn append<VM: VMBinding>(&mut self, list: &mut BlockList) {
         if !list.is_empty() {
-            assert!(list.first.load_prev_block::<VM>().is_zero(), "{} -> {}", list.first.load_prev_block::<VM>().start(), list.first.start());
+            debug_assert!(list.first.load_prev_block::<VM>().is_zero(), "{} -> {}", list.first.load_prev_block::<VM>().start(), list.first.start());
             if self.is_empty() {
                 self.first = list.first;
                 self.last = list.last;
             } else {
-                assert!(self.first.load_prev_block::<VM>().is_zero(), "{} -> {}", self.first.load_prev_block::<VM>().start(), self.first.start());
+                debug_assert!(self.first.load_prev_block::<VM>().is_zero(), "{} -> {}", self.first.load_prev_block::<VM>().start(), self.first.start());
                 self.last.store_next_block::<VM>(list.first);
                 list.first.store_prev_block::<VM>(self.last);
                 self.last = list.last;
@@ -225,7 +229,7 @@ impl BlockList {
     }
 
     pub fn lock(&mut self) {
-        assert!(self.size <= MI_LARGE_OBJ_SIZE_MAX, "{:?}", self as *mut _);
+        debug_assert!(self.size <= MI_LARGE_OBJ_SIZE_MAX, "{:?}", self as *mut _);
         let mut success = false;
         while !success {
             success = self.lock.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok();
@@ -255,7 +259,7 @@ impl<VM: VMBinding> Allocator<VM> for FreeListAllocator<VM> {
     fn alloc(&mut self, size: usize, align: usize, offset: isize) -> Address {
         trace!("alloc s={}", size);
         // see mi_heap_malloc_small
-        assert!(
+        debug_assert!(
             size <= Block::BYTES,
             "Alloc request for {} bytes is too big.",
             size
@@ -264,44 +268,52 @@ impl<VM: VMBinding> Allocator<VM> for FreeListAllocator<VM> {
         debug_assert!(align >= VM::MIN_ALIGNMENT);
         debug_assert!(offset == 0);
 
-        let addr = self.alloc_from_available(size);
-        if addr.is_zero() {
-            debug_assert!(self.available_blocks[mi_bin(size) as usize].is_empty());
-            return self.alloc_slow(size, align, offset)
+        if size < MI_SMALL_SIZE_MAX {
+            return self.alloc_small(size, align, offset);
         }
-        addr
+        return self.alloc_slow(size, align, offset);
+        // let addr = self.alloc_from_available(size);
+        // if addr.is_zero() {
+        //     debug_assert!(self.available_blocks[mi_bin(size) as usize].is_empty());
+        //     return self.alloc_slow(size, align, offset)
+        // }
+        // addr
     }
 
     fn alloc_slow_once(&mut self, size: usize, align: usize, offset: isize) -> Address {
-        // try to find an existing block with free cells
-        let bin = mi_bin(size);
-        if !self.available_blocks[bin as usize].is_empty() {
-            // we've just had GC, which has made some blocks available
-            return self.alloc_from_available(size);
-        }
 
-        let block = self.acquire_block_for_size(size, false);
+        let block = self.find_free_block(size);
         if block.is_zero() {
-            // gc
             return unsafe {Address::zero()};
         }
+    
+        self.block_alloc(block, size, align, offset)
 
-        debug_assert!(!block.is_zero());
+        // // try to find an existing block with free cells
+        // let bin = mi_bin(size);
+        // if !self.available_blocks[bin as usize].is_empty() {
+        //     // we've just had GC, which has made some blocks available
+        //     return self.alloc_from_available(size);
+        // }
 
-        // _mi_page_malloc
-        let free_list = block.load_free_list::<VM>();
-        debug_assert!(!free_list.is_zero());
+        // let block = self.acquire_block_for_size(size, false);
+        // if block.is_zero() {
+        //     // gc
+        //     return unsafe {Address::zero()};
+        // }
 
-        // update free list
-        let next_cell = unsafe { free_list.load::<Address>() };
-        block.store_free_list::<VM>(next_cell);
-        debug_assert!(block.load_free_list::<VM>() == next_cell);
+        // debug_assert!(!block.is_zero());
 
-        // set allocation bit
-        set_alloc_bit(unsafe { free_list.to_object_reference() });
-        debug_assert!(is_alloced(unsafe { free_list.to_object_reference() }));
+        // // _mi_page_malloc
+        // let free_list = block.load_free_list::<VM>();
+        // debug_assert!(!free_list.is_zero());
 
-        free_list
+        // // update free list
+        // let next_cell = unsafe { free_list.load::<Address>() };
+        // block.store_free_list::<VM>(next_cell);
+        // debug_assert!(block.load_free_list::<VM>() == next_cell);
+
+        // free_list
     }
 
     fn does_thread_local_allocation(&self) -> bool {
@@ -316,7 +328,7 @@ impl<VM: VMBinding> Allocator<VM> for FreeListAllocator<VM> {
     fn alloc_slow_once_precise_stress(&mut self, size: usize, align: usize, offset: isize, need_poll: bool) -> Address {
         trace!("allow slow precise stress s={}", size);
         let bin = mi_bin(size) as usize;
-        assert!(self.available_blocks[bin].is_empty());
+        debug_assert!(self.available_blocks[bin].is_empty());
         if need_poll {
             VM::VMActivePlan::global().poll(false, self.space);
         }
@@ -335,6 +347,7 @@ impl<VM: VMBinding> Allocator<VM> for FreeListAllocator<VM> {
                     return free_list;
                 }
                 available.pop::<VM>();
+                self.block_list_first_update(available);
                 self.consumed_blocks.get_mut(bin as usize).unwrap().push::<VM>(block);
     
                 block = available.first;
@@ -349,9 +362,6 @@ impl<VM: VMBinding> Allocator<VM> for FreeListAllocator<VM> {
         let free_list = block.load_free_list::<VM>();
         block.store_free_list::<VM>(unsafe { free_list.load::<Address>() });
 
-        // set allocation bit
-        set_alloc_bit(unsafe { free_list.to_object_reference() });
-
         free_list
     }
     #[cfg(feature = "eager_sweeping")]
@@ -360,6 +370,7 @@ impl<VM: VMBinding> Allocator<VM> for FreeListAllocator<VM> {
         let consumed = self.consumed_blocks.get_mut(bin).unwrap();
         let available = self.available_blocks.get_mut(bin).unwrap();
         consumed.append::<VM>(available);
+        self.block_list_first_update(available);
         unsafe { Address::zero() }
     }
 }
@@ -378,11 +389,32 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
             available_blocks_stress: BLOCK_LISTS_EMPTY,
             unswept_blocks: BLOCK_LISTS_EMPTY,
             consumed_blocks: BLOCK_LISTS_EMPTY,
+            blocks_free_direct: [ZERO_BLOCK; MI_BLOCKS_DIRECT],
         }
     }
 
-    fn alloc_from_available(&mut self, size: usize) -> Address {
-        trace!("alloc from available s={}", size);
+    pub fn block_alloc(&mut self, block: Block, size: usize, align: usize, offset: isize) -> Address {
+        let cell = block.load_free_list::<VM>();
+        if cell.is_zero() {
+            return self.alloc_slow(size, align, offset);
+        }
+        block.store_free_list::<VM>(unsafe { cell.load::<Address>() });
+        cell
+    }
+
+    fn get_free_small_block(&mut self, size: usize) -> Block {
+        eprintln!("get free small block");
+        let idx = mi_wsize_from_size(size);
+        self.blocks_free_direct[idx]
+    }
+
+    fn alloc_small(&mut self, size: usize, align: usize, offset: isize) -> Address {
+        eprintln!("alloc small");
+        let block = self.get_free_small_block(size);
+        self.block_alloc(block, size, align, offset)
+    }
+
+    fn find_free_block(&mut self, size: usize) -> Block {
         let bin = mi_bin(size);
         debug_assert!(bin <= MI_BIN_HUGE);
 
@@ -392,28 +424,64 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
         let mut block = available_blocks.first;
 
         while !block.is_zero() {
-            trace!("try block {}", block.start());
-            let free_list = block.load_free_list::<VM>();
-            if !free_list.is_zero() {
-                trace!("block {} has free list at {}", block.start(), free_list);
-                // update free list
-                let next_cell = unsafe { free_list.load::<Address>() };
-                block.store_free_list::<VM>(next_cell);
-                debug_assert!(block.load_free_list::<VM>() == next_cell);
-                // set allocation bit
-                set_alloc_bit(unsafe { free_list.to_object_reference() });
-                debug_assert!(is_alloced(unsafe { free_list.to_object_reference() }));
-                trace!("alloc to {}", free_list);
-                return free_list;
+            if block.has_free_cells::<VM>() {
+                return block;
             }
-            trace!("block {} exhausted, try next", block.start());
             available_blocks.pop::<VM>();
+            self.block_list_first_update(available_blocks);
             self.consumed_blocks.get_mut(bin as usize).unwrap().push::<VM>(block);
 
             block = available_blocks.first;
 
         }
-        unsafe { Address::zero() }
+        
+        self.acquire_block_for_size(size, false)
+
+    }
+
+    fn block_list_first_update(&mut self, block_list: &BlockList) {
+        if block_list.size > MI_SMALL_SIZE_MAX {
+            return
+        }
+        let block = block_list.first;
+        let mut start;
+        let idx = mi_wsize_from_size(block_list.size);
+        if self.blocks_free_direct[idx] == block {
+            // already up to date
+            return
+        }
+        if idx <= 1 {
+            start = 0;
+        } else {
+            let bin = mi_bin(block_list.size);
+            unsafe { 
+                let mut prev = ((block_list as *const BlockList as usize) - size_of::<BlockList>()) as *mut BlockList;
+                while mi_bin((*prev).size) == block_list.size && prev as usize > &mut self.available_blocks as *mut _ as usize {
+                    prev = (prev as usize - size_of::<BlockList>()) as *mut _;
+                }
+                start = 1 + mi_wsize_from_size((*prev).size);
+                if start > idx {
+                    start = idx;
+                }
+            }
+        }
+        let mut sz = start;
+        while sz <= idx {
+            self.blocks_free_direct[sz] = block;
+            sz += 1;
+        }
+    }
+
+    fn alloc_from_available(&mut self, size: usize) -> Address {
+        let block = self.find_free_block(size);
+        if block.is_zero() {
+            return unsafe { Address::zero() };
+        }
+        let free_list = block.load_free_list::<VM>();
+        debug_assert!(!free_list.is_zero());
+        let next_cell = unsafe { free_list.load::<Address>() };
+        block.store_free_list::<VM>(next_cell);
+        free_list
     }
 
 
@@ -430,7 +498,7 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
     //         }
     //         success = self.cas_thread_free_list(block, thread_free, unsafe { Address::zero() });
     //     }
-    //     assert!(false);
+    //     debug_assert!(false);
 
     //     // no more CAS needed
     //     // futher frees to the thread free list will be done from a new empty list
@@ -448,34 +516,34 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
     //     block.store_free_list(thread_free);
     // }
 
-    pub fn block_free_collect(&self, block: Block) {
-        let free_list = block.load_free_list::<VM>();
+    // pub fn block_free_collect(&self, block: Block) {
+    //     let free_list = block.load_free_list::<VM>();
 
-        // first, other threads
-        // self.block_thread_free_collect(block);
+    //     // first, other threads
+    //     // self.block_thread_free_collect(block);
 
-        // same thread
-        let local_free = block.load_local_free_list::<VM>();
-        block.store_local_free_list::<VM>(unsafe{Address::zero()});
-        debug_assert!(block.load_local_free_list::<VM>().is_zero());
+    //     // same thread
+    //     let local_free = block.load_local_free_list::<VM>();
+    //     block.store_local_free_list::<VM>(unsafe{Address::zero()});
+    //     debug_assert!(block.load_local_free_list::<VM>().is_zero());
 
-        if !local_free.is_zero() {
-            if !free_list.is_zero() {
-                let mut tail = local_free;
-                unsafe {
-                    let mut next = tail.load::<Address>();
-                    while !next.is_zero() {
-                        tail = next;
-                        next = tail.load::<Address>();
-                    }
-                    tail.store(free_list);
-                }
-            }
-            block.store_free_list::<VM>(local_free);
-        }
+    //     if !local_free.is_zero() {
+    //         if !free_list.is_zero() {
+    //             let mut tail = local_free;
+    //             unsafe {
+    //                 let mut next = tail.load::<Address>();
+    //                 while !next.is_zero() {
+    //                     tail = next;
+    //                     next = tail.load::<Address>();
+    //                 }
+    //                 tail.store(free_list);
+    //             }
+    //         }
+    //         block.store_free_list::<VM>(local_free);
+    //     }
 
-        debug_assert!(block.load_local_free_list::<VM>().is_zero());
-    }
+    //     debug_assert!(block.load_local_free_list::<VM>().is_zero());
+    // }
 
 
 
@@ -499,6 +567,7 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
                     self.available_blocks_stress.get_mut(bin).unwrap().push::<VM>(block);
                 } else {
                     self.available_blocks.get_mut(bin).unwrap().push::<VM>(block);
+                    self.block_list_first_update(self.available_blocks.get_mut(bin).unwrap());
                 }
                 return block;
             } else {
@@ -523,6 +592,7 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
                         self.available_blocks_stress[bin].push::<VM>(block);
                     } else {
                         self.available_blocks[bin].push::<VM>(block);
+                        self.block_list_first_update(&self.available_blocks[bin]);
                     }
                     self.init_block(block, self.available_blocks[bin].size);
                     
@@ -536,6 +606,7 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
                             self.available_blocks_stress[bin].push::<VM>(block);
                         } else {
                             self.available_blocks[bin].push::<VM>(block);
+                            self.block_list_first_update(&self.available_blocks[bin]);
                         }
                         return block
                     } else {
@@ -552,6 +623,7 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
                             self.available_blocks_stress[bin].push::<VM>(block);
                         } else {
                             self.available_blocks[bin].push::<VM>(block);
+                            self.block_list_first_update(&self.available_blocks[bin]);
                         }
                         return block
                     } else {
@@ -583,8 +655,8 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
         };
         
         block.store_free_list::<VM>(final_cell);
-        block.store_local_free_list::<VM>(unsafe { Address::zero() });
-        block.store_thread_free_list::<VM>(unsafe { Address::zero() });
+        // block.store_local_free_list::<VM>(unsafe { Address::zero() });
+        // block.store_thread_free_list::<VM>(unsafe { Address::zero() });
         block.store_block_cell_size::<VM>(cell_size);
 
         self.store_block_tls(block);
@@ -592,53 +664,52 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
     }
 
     pub fn sweep_block(&self, block: Block) {
+        // don't use the local free list: this does not seem necessary in a GC context
+        
         let cell_size = block.load_block_cell_size::<VM>();
-        assert!(cell_size != 0);
         let mut cell = block.start();
-        while cell < block.start() + Block::BYTES {
-            let alloced = is_alloced(unsafe { cell.to_object_reference() });
-            if alloced {
-                let marked = is_marked::<VM>(
-                    unsafe { cell.to_object_reference() },
-                    Some(Ordering::SeqCst),
-                );
-                if !marked {
-                    self.free(cell);
-                }
+        let mut last = unsafe { Address::zero() };
+        while cell + cell_size <= block.start() + Block::BYTES {
+            if !is_marked::<VM>(
+                unsafe { cell.to_object_reference() },
+                Some(Ordering::SeqCst),
+            ) {
+                unsafe { cell.store::<Address>(last); }
+                last = cell;
             }
             cell += cell_size;
         }
-        self.block_free_collect(block);
+        block.store_free_list::<VM>(last);
     }
 
-    pub fn free(&self, addr: Address) {
+    // pub fn free(&self, addr: Address) {
 
-        let block = Block::from(Block::align(addr));
-        let block_tls = block.load_tls::<VM>();
+    //     let block = Block::from(Block::align(addr));
+    //     let block_tls = block.load_tls::<VM>();
 
-        if self.tls.0 == block_tls {
-            // same thread that allocated
-            let local_free = block.load_local_free_list::<VM>();
-            unsafe {
-                addr.store(local_free);
-            }
-            block.store_local_free_list::<VM>(addr);
-        } else {
-            // different thread to allocator
-            unreachable!("tlss don't match freeing from block {}, my tls = {:?}, block tls = {:?}", block.start(), self.tls, block.load_tls::<VM>());
-            // let mut success = false;
-            // while !success {
-            //     let thread_free = FreeListAllocator::<VM>::load_thread_free_list(block);
-            //     unsafe {
-            //         addr.store(thread_free);
-            //     }
-            //     success = FreeListAllocator::<VM>::cas_thread_free_list(&self, block, thread_free, addr);
-            // }
-        }
+    //     if self.tls.0 == block_tls {
+    //         // same thread that allocated
+    //         let local_free = block.load_free_list::<VM>();
+    //         unsafe {
+    //             addr.store(local_free);
+    //         }
+    //         block.store_free_list::<VM>(addr);
+    //     } else {
+    //         // different thread to allocator
+    //         unreachable!("tlss don't match freeing from block {}, my tls = {:?}, block tls = {:?}", block.start(), self.tls, block.load_tls::<VM>());
+    //         // let mut success = false;
+    //         // while !success {
+    //         //     let thread_free = FreeListAllocator::<VM>::load_thread_free_list(block);
+    //         //     unsafe {
+    //         //         addr.store(thread_free);
+    //         //     }
+    //         //     success = FreeListAllocator::<VM>::cas_thread_free_list(&self, block, thread_free, addr);
+    //         // }
+    //     }
 
-        // unset allocation bit
-        unsafe { unset_alloc_bit_unsafe(addr.to_object_reference()) };
-    }
+    //     // unset allocation bit
+    //     unsafe { unset_alloc_bit_unsafe(addr.to_object_reference()) };
+    // }
 
     pub fn store_block_tls(&self, block: Block) {
         block.store_tls::<VM>(self.tls);
@@ -654,6 +725,7 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
             unswept.lock();
             available.lock();
             unswept.append::<VM>(available);
+            self.block_list_first_update(available);
             available.unlock();
             let consumed = self.consumed_blocks.get_mut(bin).unwrap();
             consumed.lock();
@@ -694,6 +766,7 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
             }
 
             self.available_blocks.get_mut(bin).unwrap().append::<VM>(self.consumed_blocks.get_mut(bin).unwrap());
+            self.block_list_first_update(self.available_blocks.get_mut(bin).unwrap());
             bin += 1;
         }
     }
@@ -712,6 +785,7 @@ impl<VM: VMBinding> FreeListAllocator<VM> {
             let available = self.available_blocks.get_mut(i).unwrap();
             if !available.is_empty() {
                 abandoned[i].append::<VM>(available);
+                self.block_list_first_update(&self.available_blocks[i]);
             }
             
             let available_stress = self.available_blocks_stress.get_mut(i).unwrap();
@@ -739,7 +813,7 @@ fn mi_wsize_from_size(size: usize) -> usize {
     // Align a byte size to a size in machine words
     // i.e. byte size == `wsize*sizeof(void*)`
     // adapted from _mi_wsize_from_size in mimalloc
-    (size + size_of::<u32>() - 1) / size_of::<u32>()
+    (size + MI_INTPTR_SIZE - 1) / MI_INTPTR_SIZE
 }
 
 pub fn mi_bin(size: usize) -> usize {
