@@ -97,6 +97,8 @@ pub struct CompressorWorkContext<VM: VMBinding>(std::marker::PhantomData<VM>);
 impl<VM: VMBinding> crate::scheduler::GCWorkContext for CompressorWorkContext<VM> {
     type VM = VM;
     type PlanType = Compressor<VM>;
+    #[cfg(feature = "single_worker")]
+    type STPlanType = Compressor<VM>;
     type DefaultTrace = MarkingTrace<VM>;
     type PinningTrace = UnsupportedTrace<VM>;
 }
@@ -105,6 +107,8 @@ pub struct CompressorForwardingWorkContext<VM: VMBinding>(std::marker::PhantomDa
 impl<VM: VMBinding> crate::scheduler::GCWorkContext for CompressorForwardingWorkContext<VM> {
     type VM = VM;
     type PlanType = Compressor<VM>;
+    #[cfg(feature = "single_worker")]
+    type STPlanType = Compressor<VM>;
     type DefaultTrace = ForwardingTrace<VM>;
     type PinningTrace = UnsupportedTrace<VM>;
 }

@@ -12,6 +12,8 @@ impl<VM: VMBinding, const KIND: TraceKind> crate::scheduler::GCWorkContext
 {
     type VM = VM;
     type PlanType = Immix<VM>;
+    #[cfg(feature = "single_worker")]
+    type STPlanType = Immix<VM>;
     type DefaultTrace = PlanTrace<Immix<VM>, KIND>;
     type PinningTrace = PlanTrace<Immix<VM>, TRACE_KIND_TRANSITIVE_PIN>;
 }

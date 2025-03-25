@@ -7,6 +7,8 @@ pub struct MSGCWorkContext<VM: VMBinding>(std::marker::PhantomData<VM>);
 impl<VM: VMBinding> crate::scheduler::GCWorkContext for MSGCWorkContext<VM> {
     type VM = VM;
     type PlanType = MarkSweep<VM>;
+    #[cfg(feature = "single_worker")]
+    type STPlanType = MarkSweep<VM>;
     type DefaultTrace = PlanTrace<MarkSweep<VM>, DEFAULT_TRACE>;
     type PinningTrace = PlanTrace<MarkSweep<VM>, DEFAULT_TRACE>;
 }

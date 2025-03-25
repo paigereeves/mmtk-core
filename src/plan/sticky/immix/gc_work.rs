@@ -12,6 +12,8 @@ pub struct StickyImmixNurseryGCWorkContext<VM: VMBinding>(std::marker::PhantomDa
 impl<VM: VMBinding> crate::scheduler::GCWorkContext for StickyImmixNurseryGCWorkContext<VM> {
     type VM = VM;
     type PlanType = StickyImmix<VM>;
+    #[cfg(feature = "single_worker")]
+    type STPlanType = StickyImmix<VM>;
     type DefaultTrace = GenNurseryTrace<VM, Self::PlanType, DEFAULT_TRACE>;
     type PinningTrace = GenNurseryTrace<VM, Self::PlanType, TRACE_KIND_TRANSITIVE_PIN>;
 }
@@ -24,6 +26,8 @@ impl<VM: VMBinding, const KIND: TraceKind> crate::scheduler::GCWorkContext
 {
     type VM = VM;
     type PlanType = StickyImmix<VM>;
+    #[cfg(feature = "single_worker")]
+    type STPlanType = StickyImmix<VM>;
     type DefaultTrace = PlanTrace<Self::PlanType, KIND>;
     type PinningTrace = PlanTrace<Self::PlanType, TRACE_KIND_TRANSITIVE_PIN>;
 }

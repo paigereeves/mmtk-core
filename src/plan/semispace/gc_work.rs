@@ -7,6 +7,8 @@ pub struct SSGCWorkContext<VM: VMBinding>(std::marker::PhantomData<VM>);
 impl<VM: VMBinding> crate::scheduler::GCWorkContext for SSGCWorkContext<VM> {
     type VM = VM;
     type PlanType = SemiSpace<VM>;
+    #[cfg(feature = "single_worker")]
+    type STPlanType = SemiSpace<VM>;
     type DefaultTrace = PlanTrace<SemiSpace<VM>, DEFAULT_TRACE>;
     type PinningTrace = UnsupportedTrace<VM>;
 }

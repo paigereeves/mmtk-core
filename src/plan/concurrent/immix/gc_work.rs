@@ -15,6 +15,8 @@ impl<VM: VMBinding, const KIND: TraceKind> crate::scheduler::GCWorkContext
 {
     type VM = VM;
     type PlanType = ConcurrentImmix<VM>;
+    #[cfg(feature = "single_worker")]
+    type STPlanType = ConcurrentImmix<VM>;
     type DefaultTrace = PlanTrace<ConcurrentImmix<VM>, KIND>;
     type PinningTrace = PlanTrace<ConcurrentImmix<VM>, TRACE_KIND_TRANSITIVE_PIN>;
 }
@@ -26,6 +28,8 @@ pub(super) struct ConcurrentImmixGCWorkContext<VM>(std::marker::PhantomData<VM>)
 impl<VM: VMBinding> crate::scheduler::GCWorkContext for ConcurrentImmixGCWorkContext<VM> {
     type VM = VM;
     type PlanType = ConcurrentImmix<VM>;
+    #[cfg(feature = "single_worker")]
+    type STPlanType = ConcurrentImmix<VM>;
     type DefaultTrace = PlanTrace<Self::PlanType, TRACE_KIND_FAST>;
     type PinningTrace = PlanTrace<Self::PlanType, TRACE_KIND_FAST>;
 

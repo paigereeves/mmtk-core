@@ -2,6 +2,8 @@ use super::worker::*;
 use crate::plan::tracing::gc_work::root::DefaultRootsWorkFactory;
 use crate::vm::{RootsWorkFactory, VMBinding};
 use crate::{mmtk::MMTK, plan::tracing::Trace};
+#[cfg(feature = "single_worker")]
+use crate::plan::PlanTraceObject;
 #[cfg(feature = "work_packet_stats")]
 use std::any::{type_name, TypeId};
 
@@ -74,6 +76,8 @@ use crate::plan::Plan;
 pub trait GCWorkContext: Send + 'static {
     type VM: VMBinding;
     type PlanType: Plan<VM = Self::VM>;
+    #[cfg(feature = "single_worker")]
+    type STPlanType: Plan<VM = Self::VM> + PlanTraceObject<Self::VM> + Send;
 
     // FIXME: We should use `SFTTrace` as the default value for `DefaultTrace`, and
     // `UnsupportedTrace` for `PinningTrace`.  However, this requires `associated_type_defaults`
