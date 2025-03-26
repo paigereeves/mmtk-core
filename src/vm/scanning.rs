@@ -148,7 +148,6 @@ pub(crate) enum RootsKind {
 #[cfg(feature = "single_worker")]
 pub trait ObjectGraphTraversal<SL: Slot> {
     fn report_roots(&mut self, root_slots: Vec<SL>);
-    fn traverse_from_roots(&mut self);
 }
 
 /// VM-specific methods for scanning roots/objects.
