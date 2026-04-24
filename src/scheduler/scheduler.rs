@@ -631,6 +631,9 @@ impl<VM: VMBinding> GCWorkScheduler<VM> {
 
         // Set to NotInGC after everything, and right before resuming mutators.
         mmtk.set_gc_status(GcStatus::NotInGC);
+        if !mmtk.is_warmup() {
+            mmtk.perf_ctrl_disable();
+        }
         <VM as VMBinding>::VMCollection::resume_mutators(worker.tls);
 
         concurrent_work_scheduled

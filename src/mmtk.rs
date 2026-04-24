@@ -30,7 +30,12 @@ use crate::vm::VMBinding;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::default::Default;
-#[cfg(feature = "sanity")]
+use std::env;
+use std::fs::File;
+use std::io::Read;
+use std::io::Write;
+use std::os::fd::FromRawFd;
+use std::os::fd::IntoRawFd;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -103,6 +108,58 @@ impl MMTKBuilder {
     }
 }
 
+fn read_perf_fd_env(env_name: &'static str) -> i32 {
+    let fd_str: String = match env::var(env_name) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    match str::parse(&fd_str) {
+        Ok(fd) if fd < 0 => -1,
+        Ok(fd) => fd,
+        Err(_) => -1,
+    }
+}
+
+fn perf_ctrl_send_command(command: &'static str) -> bool {
+    let ctrl_fd_opt: i32 = read_perf_fd_env("PERF_CTL_FD");
+    let ctrl_ack_fd_opt: i32 = read_perf_fd_env("PERF_CTL_ACK_FD");
+    if ctrl_fd_opt == -1 {
+        return false;
+    }
+    let ctrl_fd: i32 = ctrl_fd_opt;
+    let mut f = unsafe { File::from_raw_fd(ctrl_fd) };
+    if f.write_all(command.as_bytes()).is_err() {
+        return false;
+    }
+    let _ = f.into_raw_fd(); // prevent the pipe from closing upon return
+
+    if ctrl_ack_fd_opt != -1 {
+        let ctrl_ack_fd: i32 = ctrl_ack_fd_opt;
+        let mut buffer = [0; 256];
+
+        let mut f = unsafe { File::from_raw_fd(ctrl_ack_fd) };
+        let bytes_read = match f.read(&mut buffer) {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+        let _ = f.into_raw_fd(); // prevent the pipe from closing upon return
+        if bytes_read != 5 {
+            eprintln!("perf_ctrl: Failed to read exactly 4 bytes, from ACK FIFO (FD {}): '{:?}' ({bytes_read} bytes)\n", ctrl_ack_fd, std::str::from_utf8(&buffer));
+            return false;
+        }
+        if &buffer[0..4] == b"ack\n" {
+            return true;
+        } else {
+            eprintln!(
+                "perf_ctrl: Unexpected response from ACK FIFO (FD {}): '{:?}'\n",
+                ctrl_ack_fd, buffer
+            );
+            return false;
+        }
+    }
+    true
+}
+
 impl Default for MMTKBuilder {
     fn default() -> Self {
         Self::new()
@@ -130,6 +187,7 @@ pub struct MMTK<VM: VMBinding> {
     /// Analysis counters. The feature analysis allows us to periodically stop the world and collect some statistics.
     #[cfg(feature = "analysis")]
     pub(crate) analysis_manager: Arc<AnalysisManager<VM>>,
+    pub(crate) warmup: AtomicBool,
 }
 
 unsafe impl<VM: VMBinding> Sync for MMTK<VM> {}
@@ -239,6 +297,7 @@ impl<VM: VMBinding> MMTK<VM> {
             analysis_manager: Arc::new(AnalysisManager::new(stats.clone())),
             gc_trigger,
             stats,
+            warmup: AtomicBool::new(true),
         }
     }
 
@@ -340,8 +399,13 @@ impl<VM: VMBinding> MMTK<VM> {
     /// Generic hook to allow benchmarks to be harnessed. MMTk will trigger a GC
     /// to clear any residual garbage and start collecting statistics for the benchmark.
     /// This is usually called by the benchmark harness as its last step before the actual benchmark.
-    pub fn harness_begin(&self, tls: VMMutatorThread) {
+    pub fn harness_begin(&self, tls: VMMutatorThread, warmup: bool) {
         probe!(mmtk, harness_begin);
+        self.warmup.store(warmup, Ordering::Relaxed);
+        
+        if warmup {
+            return;
+        }
         self.handle_user_collection_request(tls, true, true);
         self.state.inside_harness.store(true, Ordering::SeqCst);
         self.stats.start_all();
@@ -355,6 +419,18 @@ impl<VM: VMBinding> MMTK<VM> {
         self.stats.stop_all(self);
         self.state.inside_harness.store(false, Ordering::SeqCst);
         probe!(mmtk, harness_end);
+    }
+
+    pub fn is_warmup(&self) -> bool {
+        self.warmup.load(Ordering::Relaxed)
+    }
+
+    pub fn perf_ctrl_enable(&'static self) {
+        perf_ctrl_send_command("enable\n");
+    }
+
+    pub fn perf_ctrl_disable(&'static self) {
+        perf_ctrl_send_command("disable\n");
     }
 
     #[cfg(feature = "sanity")]

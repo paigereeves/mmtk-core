@@ -237,6 +237,9 @@ impl<C: GCWorkContext> GCWork<C::VM> for StopMutators<C> {
             mmtk.scheduler.work_buckets[WorkBucketStage::Prepare]
                 .add(ScanVMSpecificRoots::<C>::new());
         }
+        if !mmtk.is_warmup() {
+            mmtk.perf_ctrl_enable();
+        }
     }
 }
 

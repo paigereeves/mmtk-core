@@ -51,6 +51,7 @@ pub struct GlobalState {
     pub(crate) live_bytes_in_last_gc: AtomicRefCell<HashMap<&'static str, LiveBytesStats>>,
     /// The number of used pages at the end of the last GC. This can be used to estimate how many pages we have allocated since last GC.
     pub(crate) used_pages_after_last_gc: AtomicUsize,
+    pub(crate) warmup: AtomicBool,
 }
 
 impl GlobalState {
@@ -218,6 +219,7 @@ impl Default for GlobalState {
             malloc_bytes: AtomicUsize::new(0),
             live_bytes_in_last_gc: AtomicRefCell::new(HashMap::new()),
             used_pages_after_last_gc: AtomicUsize::new(0),
+            warmup: AtomicBool::new(true),
         }
     }
 }
