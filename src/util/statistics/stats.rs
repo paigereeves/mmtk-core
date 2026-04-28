@@ -59,6 +59,7 @@ pub struct Stats {
     perfmon: Perfmon,
     pub shared: Arc<SharedStats>,
     counters: Mutex<Vec<Arc<Mutex<dyn Counter + Send>>>>,
+    pub inside_harness: AtomicBool,
 }
 
 impl Stats {
@@ -105,6 +106,7 @@ impl Stats {
             perfmon,
             shared,
             counters: Mutex::new(counters),
+            inside_harness: AtomicBool::new(false),
         }
     }
 
@@ -164,6 +166,10 @@ impl Stats {
             counter.lock().unwrap().phase_change(self.get_phase());
         }
         self.shared.increment_phase();
+
+        if self.inside_harness.load(Ordering::SeqCst) {
+            perf_ctrl_enable();
+        }
     }
 
     pub fn end_gc(&self) {
@@ -175,6 +181,10 @@ impl Stats {
             counter.lock().unwrap().phase_change(self.get_phase());
         }
         self.shared.increment_phase();
+
+        if self.inside_harness.load(Ordering::SeqCst) {
+            perf_ctrl_disable();
+        }
     }
 
     pub fn print_stats<VM: VMBinding>(&self, mmtk: &'static MMTK<VM>) {
