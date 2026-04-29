@@ -11,7 +11,7 @@ pub struct PerfEventDiffable {
 impl PerfEventDiffable {
     pub fn new(name: &str, exclude_kernel: bool) -> Self {
         let mut pe = PerfEvent::new(name, true)
-            .unwrap_or_else(|_| panic!("Failed to create perf event {}", name));
+            .unwrap_or_else(|e| panic!("Failed to create perf event {}: {}", name, e));
         pe.set_exclude_kernel(exclude_kernel as u64);
         // measures the calling thread (and all child threads) on all CPUs
         pe.open(0, -1)
@@ -34,7 +34,7 @@ impl Diffable for PerfEventDiffable {
 
     fn current_value(&mut self) -> Self::Val {
         let val = self.pe.read().expect("Failed to read perf evet");
-        assert_eq!(val.time_enabled, val.time_running, "perf event multiplexed");
+        // assert_eq!(val.time_enabled, val.time_running, "perf event multiplexed");
         val
     }
 

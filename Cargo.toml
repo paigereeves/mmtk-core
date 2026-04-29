@@ -54,7 +54,7 @@ memoffset = "0.9"
 mimalloc-sys = { version = "0.1.6", optional = true }
 num_cpus = "1.8"
 num-traits = "0.2"
-pfm = { version = "0.1.1", optional = true }
+pfm = { version = "0.1.2", optional = true }
 portable-atomic = "1.4.3"
 probe = "0.5"
 regex = "1.7.0"
@@ -97,7 +97,7 @@ name = "main"
 harness = false
 
 [features]
-default = ["builtin_env_logger", "log/release_max_level_off"]
+default = ["builtin_env_logger", "log/release_max_level_off", "perf_counter"]
 
 # Built-in env_logger.  This feature is enabled by default.
 # The user can disable this default feature to remove `env_logger` from the dependencies.
