@@ -14,6 +14,7 @@ use crate::plan::tracing::gc_work::weakref::{
 };
 use crate::util::opaque_pointer::*;
 use crate::util::options::AffinityKind;
+use crate::util::statistics::stats::{perf_ctrl_disable, perf_ctrl_enable};
 use crate::vm::Collection;
 use crate::vm::VMBinding;
 use crate::Plan;
@@ -21,6 +22,7 @@ use crossbeam::deque::Steal;
 use enum_map::{Enum, EnumMap};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 pub struct GCWorkScheduler<VM: VMBinding> {
@@ -32,6 +34,7 @@ pub struct GCWorkScheduler<VM: VMBinding> {
     pub(crate) worker_monitor: Arc<WorkerMonitor>,
     /// How to assign the affinity of each GC thread. Specified by the user.
     affinity: AffinityKind,
+    pub(crate) inside_harness: AtomicBool,
 }
 
 // FIXME: GCWorkScheduler should be naturally Sync, but we cannot remove this `impl` yet.
@@ -77,6 +80,7 @@ impl<VM: VMBinding> GCWorkScheduler<VM> {
             worker_group,
             worker_monitor,
             affinity,
+            inside_harness: AtomicBool::new(false)
         })
     }
 
@@ -301,6 +305,13 @@ impl<VM: VMBinding> GCWorkScheduler<VM> {
             let bucket_opened = bucket.update(self);
             buckets_updated = buckets_updated || bucket_opened;
             if bucket_opened {
+                if self.inside_harness.load(std::sync::atomic::Ordering::SeqCst) {
+                    if id == WorkBucketStage::Closure {
+                        perf_ctrl_enable();
+                    } else if id == WorkBucketStage::Release {
+                        perf_ctrl_disable();
+                    }
+                }
                 probe!(mmtk, bucket_opened, id);
                 new_packets = new_packets || !bucket.is_drained();
                 if new_packets {

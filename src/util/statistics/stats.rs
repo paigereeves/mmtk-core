@@ -167,9 +167,9 @@ impl Stats {
         }
         self.shared.increment_phase();
 
-        if self.inside_harness.load(Ordering::SeqCst) {
-            perf_ctrl_enable();
-        }
+        // if self.inside_harness.load(Ordering::SeqCst) {
+        //     perf_ctrl_enable();
+        // }
     }
 
     pub fn end_gc(&self) {
@@ -182,9 +182,9 @@ impl Stats {
         }
         self.shared.increment_phase();
 
-        if self.inside_harness.load(Ordering::SeqCst) {
-            perf_ctrl_disable();
-        }
+        // if self.inside_harness.load(Ordering::SeqCst) {
+        //     perf_ctrl_disable();
+        // }
     }
 
     pub fn print_stats<VM: VMBinding>(&self, mmtk: &'static MMTK<VM>) {
@@ -324,10 +324,10 @@ fn perf_ctrl_send_command(command: &'static str) -> bool {
     true
 }
 
-fn perf_ctrl_enable() {
+pub(crate) fn perf_ctrl_enable() {
     perf_ctrl_send_command("enable\n");
 }
 
-fn perf_ctrl_disable() {
+pub(crate) fn perf_ctrl_disable() {
     perf_ctrl_send_command("disable\n");
 }

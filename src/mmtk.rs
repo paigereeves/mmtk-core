@@ -346,6 +346,7 @@ impl<VM: VMBinding> MMTK<VM> {
         self.handle_user_collection_request(tls, true, true);
         self.state.inside_harness.store(true, Ordering::SeqCst);
         self.stats.inside_harness.store(true, Ordering::SeqCst);
+        self.scheduler.inside_harness.store(true, Ordering::SeqCst);
         self.stats.start_all();
         self.scheduler.enable_stat();
     }
@@ -357,6 +358,7 @@ impl<VM: VMBinding> MMTK<VM> {
         self.stats.stop_all(self);
         self.state.inside_harness.store(false, Ordering::SeqCst);
         self.stats.inside_harness.store(false, Ordering::SeqCst);
+        self.scheduler.inside_harness.store(false, Ordering::SeqCst);
         probe!(mmtk, harness_end);
         let proc_self_maps =
             fs::read_to_string("/proc/self/maps").expect("failed to read /proc/self/maps");
