@@ -11,6 +11,13 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use std::env;
+use std::fs::File;
+use std::io::Read;
+use std::io::Write;
+use std::os::fd::FromRawFd;
+use std::os::fd::IntoRawFd;
+
 /// The default number of phases for statistics.
 pub const DEFAULT_NUM_PHASES: usize = 1 << 12;
 pub const MAX_COUNTERS: usize = 100;
@@ -157,6 +164,7 @@ impl Stats {
             counter.lock().unwrap().phase_change(self.get_phase());
         }
         self.shared.increment_phase();
+        perf_ctrl_enable();
     }
 
     pub fn end_gc(&self) {
@@ -168,6 +176,7 @@ impl Stats {
             counter.lock().unwrap().phase_change(self.get_phase());
         }
         self.shared.increment_phase();
+        perf_ctrl_disable();
     }
 
     pub fn print_stats<VM: VMBinding>(&self, mmtk: &'static MMTK<VM>) {
@@ -251,4 +260,64 @@ impl Stats {
     pub fn get_gathering_stats(&self) -> bool {
         self.shared.get_gathering_stats()
     }
+}
+
+fn read_perf_fd_env(env_name: &'static str) -> i32 {
+    let fd_str: String = match env::var(env_name) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    match str::parse(&fd_str) {
+        Ok(fd) if fd < 0 => -1,
+        Ok(fd) => fd,
+        Err(_) => -1,
+    }
+}
+
+fn perf_ctrl_send_command(command: &'static str) -> bool {
+    let ctrl_fd_opt: i32 = read_perf_fd_env("PERF_CTL_FD");
+    let ctrl_ack_fd_opt: i32 = read_perf_fd_env("PERF_CTL_ACK_FD");
+    if ctrl_fd_opt == -1 {
+        return false;
+    }
+    let ctrl_fd: i32 = ctrl_fd_opt;
+    let mut f = unsafe { File::from_raw_fd(ctrl_fd) };
+    if f.write_all(command.as_bytes()).is_err() {
+        return false;
+    }
+    let _ = f.into_raw_fd(); // prevent the pipe from closing upon return
+
+    if ctrl_ack_fd_opt != -1 {
+        let ctrl_ack_fd: i32 = ctrl_ack_fd_opt;
+        let mut buffer = [0; 256];
+
+        let mut f = unsafe { File::from_raw_fd(ctrl_ack_fd) };
+        let bytes_read = match f.read(&mut buffer) {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+        let _ = f.into_raw_fd(); // prevent the pipe from closing upon return
+        if bytes_read != 5 {
+            eprintln!("perf_ctrl: Failed to read exactly 4 bytes, from ACK FIFO (FD {}): '{:?}' ({bytes_read} bytes)\n", ctrl_ack_fd, std::str::from_utf8(&buffer));
+            return false;
+        }
+        if &buffer[0..4] == b"ack\n" {
+            return true;
+        } else {
+            eprintln!(
+                "perf_ctrl: Unexpected response from ACK FIFO (FD {}): '{:?}'\n",
+                ctrl_ack_fd, buffer
+            );
+            return false;
+        }
+    }
+    true
+}
+
+fn perf_ctrl_enable() {
+    perf_ctrl_send_command("enable\n");
+}
+
+fn perf_ctrl_disable() {
+    perf_ctrl_send_command("disable\n");
 }
