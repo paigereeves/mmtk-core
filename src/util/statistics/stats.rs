@@ -164,7 +164,6 @@ impl Stats {
             counter.lock().unwrap().phase_change(self.get_phase());
         }
         self.shared.increment_phase();
-        perf_ctrl_enable();
     }
 
     pub fn end_gc(&self) {
@@ -176,7 +175,6 @@ impl Stats {
             counter.lock().unwrap().phase_change(self.get_phase());
         }
         self.shared.increment_phase();
-        perf_ctrl_disable();
     }
 
     pub fn print_stats<VM: VMBinding>(&self, mmtk: &'static MMTK<VM>) {
@@ -238,9 +236,11 @@ impl Stats {
                 ctr.start();
             }
         }
+        perf_ctrl_enable();
     }
 
     pub fn stop_all<VM: VMBinding>(&self, mmtk: &'static MMTK<VM>) {
+        perf_ctrl_disable();
         self.stop_all_counters();
         self.print_stats(mmtk);
     }
