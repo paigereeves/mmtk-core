@@ -30,6 +30,7 @@ use crate::vm::VMBinding;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::default::Default;
+use std::fs;
 #[cfg(feature = "sanity")]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -355,6 +356,9 @@ impl<VM: VMBinding> MMTK<VM> {
         self.stats.stop_all(self);
         self.state.inside_harness.store(false, Ordering::SeqCst);
         probe!(mmtk, harness_end);
+        let proc_self_maps =
+            fs::read_to_string("/proc/self/maps").expect("failed to read /proc/self/maps");
+        println!("Mapped memory regions:\n{proc_self_maps}");
     }
 
     #[cfg(feature = "sanity")]
