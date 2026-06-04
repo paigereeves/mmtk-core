@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use crate::{
     plan::{
         tracing::{gc_work::DefaultObjectTracerContext, SlotOfTrace, Trace},
-        VectorObjectQueue, VectorQueue,
+        VectorQueue,
     },
     scheduler::{GCWork, GCWorker, GCWorkerShared, WorkBucketStage},
     util::{ObjectReference, VMWorkerThread},
@@ -23,43 +23,48 @@ pub struct ProcessSlots<T: Trace> {
 }
 
 impl<T: Trace> ProcessSlots<T> {
-    const SCAN_OBJECTS_IMMEDIATELY: bool = true;
-
     pub fn new(slots: Vec<SlotOfTrace<T>>, bucket: WorkBucketStage) -> Self {
         Self { slots, bucket }
     }
 
-    fn process_slots(
-        &mut self,
-        worker: &mut GCWorker<T::VM>,
-        trace: T,
-    ) -> VectorQueue<ObjectReference> {
-        let mut queue = VectorObjectQueue::new();
+    fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T) {
+        debug_assert!(!T::may_move_objects());
+
+        let mut slot_queue = VectorQueue::<SlotOfTrace<T>>::new();
+        let tls = worker.tls;
+        let mut work_packet_buffer: Vec<ProcessSlots<T>> = Vec::new();
+
+        let flush_slot_queue =
+            |slots: &mut VectorQueue<_>, work_packet_buffer: &mut Vec<ProcessSlots<T>>| {
+                let buffer = slots.take();
+                let work_packet = ProcessSlots::<T>::new(buffer, self.bucket);
+                work_packet_buffer.push(work_packet);
+            };
+
+        let flush_work_packet_buffer =
+            |worker: &mut GCWorker<T::VM>, work_packet_buffer: &mut Vec<ProcessSlots<T>>| {
+                while let Some(work) = work_packet_buffer.pop() {
+                    worker.add_work(self.bucket, work);
+                }
+            };
 
         for slot in self.slots.iter() {
             if let Some(object) = slot.load() {
-                let new_object = trace.trace_object(worker, object, &mut queue);
-                if T::may_move_objects() && new_object != object {
-                    slot.store(new_object);
-                }
+                trace.trace_object(worker, object, &mut |object| {
+                    <T::VM as VMBinding>::VMScanning::scan_object(tls, object, &mut |slot| {
+                        slot_queue.push(slot);
+                        if slot_queue.is_full() {
+                            flush_slot_queue(&mut slot_queue, &mut work_packet_buffer);
+                        }
+                    });
+                    trace.post_scan_object(object);
+                });
+                flush_work_packet_buffer(worker, &mut work_packet_buffer);
             }
         }
-
-        queue
-    }
-
-    fn flush(&mut self, worker: &mut GCWorker<T::VM>, mut queue: VectorQueue<ObjectReference>) {
-        if queue.is_empty() {
-            return;
-        }
-
-        let queued_objects = queue.take();
-        let mut work = ProcessNodes::<T>::new(queued_objects, self.bucket);
-
-        if Self::SCAN_OBJECTS_IMMEDIATELY {
-            work.do_work(worker, worker.mmtk);
-        } else {
-            worker.add_work(self.bucket, work);
+        if !slot_queue.is_empty() {
+            flush_slot_queue(&mut slot_queue, &mut work_packet_buffer);
+            flush_work_packet_buffer(worker, &mut work_packet_buffer);
         }
     }
 }
@@ -78,21 +83,17 @@ impl<T: Trace> GCWork<T::VM> for ProcessSlots<T> {
             }
         }
 
-        let queue = self.process_slots(worker, trace);
-
-        self.flush(worker, queue);
+        self.process_slots(worker, trace);
     }
 }
 
 /// A work packet for scanning objects and optionally do node-enqueuing tracing during a
 /// stop-the-world tracing GC and the final mark pause of a concurrent GC.
 ///
-/// It will scan each object.  For objects that supports slot enqueuing, it will collect their slots
-/// and spawn [`ProcessSlots`] work packets to trace them.  For objects that don't support slot
-/// enqueuing, it will immediately trace their slots and spawn other [`ProcessNodes`] work packets
-/// to process their newly traced children.  It is the VM's responsibility to implement
-/// [`Scanning::scan_object_and_trace_edges`] to update the references to point to the new addresses
-/// in such a case.
+/// It will scan each objects.  For objects that supports slot enqueuing, it will collect their
+/// slots and spawn [`ProcessSlots`] work packets to trace them.  For objects that don't
+/// support slot enqueuing, it will immediately trace their slots and spawn other
+/// [`ProcessNodes`] work packets to process their newly traced children.
 pub struct ProcessNodes<T: Trace> {
     objects: Vec<ObjectReference>,
     bucket: WorkBucketStage,
