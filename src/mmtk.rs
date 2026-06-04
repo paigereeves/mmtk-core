@@ -358,7 +358,7 @@ impl<VM: VMBinding> MMTK<VM> {
         probe!(mmtk, harness_end);
         let proc_self_maps =
             fs::read_to_string("/proc/self/maps").expect("failed to read /proc/self/maps");
-        println!("Mapped memory regions:\n{proc_self_maps}");
+        println!("proc_self_maps:\n{proc_self_maps}");
     }
 
     #[cfg(feature = "sanity")]

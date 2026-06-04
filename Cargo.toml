@@ -96,7 +96,7 @@ name = "main"
 harness = false
 
 [features]
-default = ["builtin_env_logger", "log/release_max_level_off", "perf_closure"]
+default = ["builtin_env_logger", "log/release_max_level_off", "perf_closure", "immix_non_moving"]
 
 perf_closure = []
 perf_gc = []
