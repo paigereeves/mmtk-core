@@ -64,15 +64,16 @@ impl<VM: VMBinding> Plan for SemiSpace<VM> {
     }
 
     fn schedule_collection(&'static self, scheduler: &GCWorkScheduler<VM>) {
-        scheduler.schedule_common_work::<SSGCWorkContext<VM>>(self);
+        use crate::policy::gc_work::DEFAULT_TRACE;
+        scheduler.schedule_common_work::<SSGCWorkContext<VM, DEFAULT_TRACE>, DEFAULT_TRACE>(self);
     }
 
     fn get_allocator_mapping(&self) -> &'static EnumMap<AllocationSemantics, AllocatorSelector> {
         &ALLOCATOR_MAPPING
     }
 
-    fn prepare(&mut self, tls: VMWorkerThread) {
-        self.common.prepare(tls, true);
+    fn prepare(&mut self, worker: &mut GCWorker<VM>) {
+        self.common.prepare(worker, true);
 
         self.hi
             .store(!self.hi.load(Ordering::SeqCst), Ordering::SeqCst); // flip the semi-spaces
@@ -89,8 +90,8 @@ impl<VM: VMBinding> Plan for SemiSpace<VM> {
         unsafe { worker.get_copy_context_mut().copy[0].assume_init_mut() }.rebind(self.tospace());
     }
 
-    fn release(&mut self, tls: VMWorkerThread) {
-        self.common.release(tls, true);
+    fn release(&mut self, worker: &mut GCWorker<VM>) {
+        self.common.release(worker, true);
         // release the collected region
         self.fromspace().release();
     }

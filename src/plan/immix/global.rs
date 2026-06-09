@@ -84,12 +84,12 @@ impl<VM: VMBinding> Plan for Immix<VM> {
         &ALLOCATOR_MAPPING
     }
 
-    fn prepare(&mut self, tls: VMWorkerThread) {
-        self.prepare_inner(tls, UnlogBitsOperation::NoOp)
+    fn prepare(&mut self, worker: &mut GCWorker<VM>) {
+        self.prepare_inner(worker, UnlogBitsOperation::NoOp)
     }
 
-    fn release(&mut self, tls: VMWorkerThread) {
-        self.release_inner(tls, UnlogBitsOperation::NoOp);
+    fn release(&mut self, worker: &mut GCWorker<VM>) {
+        self.release_inner(worker, UnlogBitsOperation::NoOp);
     }
 
     fn end_of_gc(&mut self, tls: VMWorkerThread) {
@@ -190,9 +190,11 @@ impl<VM: VMBinding> Immix<VM> {
         );
 
         if in_defrag {
-            scheduler.schedule_common_work::<DefragContext>(plan);
+            info!("{} defrag collection", immix_space.get_name());
+            scheduler.schedule_common_work::<DefragContext, TRACE_KIND_DEFRAG>(plan);
         } else {
-            scheduler.schedule_common_work::<FastContext>(plan);
+            info!("{} non-moving collection", immix_space.get_name());
+            scheduler.schedule_common_work::<FastContext, TRACE_KIND_FAST>(plan);
         }
     }
 
@@ -204,11 +206,12 @@ impl<VM: VMBinding> Immix<VM> {
     /// Some Immix-derived plans may need to set/clear unlog bits when preparing.
     pub(in crate::plan) fn prepare_inner(
         &mut self,
-        tls: VMWorkerThread,
+        worker: &mut GCWorker<VM>,
         unlog_bits_op: UnlogBitsOperation,
     ) {
-        self.common.prepare(tls, true);
+        self.common.prepare(worker, true);
         self.immix_space.prepare(
+            worker,
             true,
             Some(crate::policy::immix::defrag::StatsForDefrag::new(self)),
             unlog_bits_op,
@@ -219,11 +222,11 @@ impl<VM: VMBinding> Immix<VM> {
     /// Some Immix-derived plans may need to set/clear unlog bits when releasing.
     pub(in crate::plan) fn release_inner(
         &mut self,
-        tls: VMWorkerThread,
+        worker: &mut GCWorker<VM>,
         unlog_bits_op: UnlogBitsOperation,
     ) {
-        self.common.release(tls, true);
+        self.common.release(worker, true);
         // release the collected region
-        self.immix_space.release(true, unlog_bits_op);
+        self.immix_space.release(worker, true, unlog_bits_op);
     }
 }

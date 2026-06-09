@@ -74,11 +74,12 @@ impl<VM: VMBinding> Plan for GenCopy<VM> {
     }
 
     fn schedule_collection(&'static self, scheduler: &GCWorkScheduler<VM>) {
+        use crate::policy::gc_work::DEFAULT_TRACE;
         let is_full_heap = self.requires_full_heap_collection();
         if is_full_heap {
-            scheduler.schedule_common_work::<GenCopyGCWorkContext<VM>>(self);
+            scheduler.schedule_common_work::<GenCopyGCWorkContext<VM>, DEFAULT_TRACE>(self);
         } else {
-            scheduler.schedule_common_work::<GenCopyNurseryGCWorkContext<VM>>(self);
+            scheduler.schedule_common_work::<GenCopyNurseryGCWorkContext<VM>, DEFAULT_TRACE>(self);
         }
     }
 
@@ -86,9 +87,9 @@ impl<VM: VMBinding> Plan for GenCopy<VM> {
         &ALLOCATOR_MAPPING
     }
 
-    fn prepare(&mut self, tls: VMWorkerThread) {
+    fn prepare(&mut self, worker: &mut GCWorker<VM>) {
         let full_heap = !self.gen.is_current_gc_nursery();
-        self.gen.prepare(tls);
+        self.gen.prepare(worker);
         if full_heap {
             self.hi
                 .store(!self.hi.load(Ordering::SeqCst), Ordering::SeqCst); // flip the semi-spaces
@@ -106,9 +107,9 @@ impl<VM: VMBinding> Plan for GenCopy<VM> {
         unsafe { worker.get_copy_context_mut().copy[0].assume_init_mut() }.rebind(self.tospace());
     }
 
-    fn release(&mut self, tls: VMWorkerThread) {
+    fn release(&mut self, worker: &mut GCWorker<VM>) {
         let full_heap = !self.gen.is_current_gc_nursery();
-        self.gen.release(tls);
+        self.gen.release(worker);
         if full_heap {
             if VM::VMObjectModel::GLOBAL_LOG_BIT_SPEC.is_on_side() {
                 self.fromspace().clear_side_log_bits();

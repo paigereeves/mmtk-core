@@ -205,8 +205,8 @@ pub trait Plan: 'static + HasSpaces + Sync + Downcast {
     fn notify_mutators_paused(&self, _scheduler: &GCWorkScheduler<Self::VM>) {}
 
     /// Prepare the plan before a GC. This is invoked in an initial step in the GC.
-    /// This is invoked once per GC by one worker thread. `tls` is the worker thread that executes this method.
-    fn prepare(&mut self, tls: VMWorkerThread);
+    /// This is invoked once per GC by one worker thread.
+    fn prepare(&mut self, worker: &mut GCWorker<Self::VM>);
 
     /// Prepare a worker for a GC. Each worker has its own prepare method. This hook is for plan-specific
     /// per-worker preparation. This method is invoked once per worker by the worker thread passed as the argument.
@@ -214,8 +214,8 @@ pub trait Plan: 'static + HasSpaces + Sync + Downcast {
 
     /// Release the plan after transitive closure. A plan can implement this method to call each policy's release,
     /// or create any work packet that should be done in release.
-    /// This is invoked once per GC by one worker thread. `tls` is the worker thread that executes this method.
-    fn release(&mut self, tls: VMWorkerThread);
+    /// This is invoked once per GC by one worker thread.
+    fn release(&mut self, worker: &mut GCWorker<Self::VM>);
 
     /// Inform the plan about the end of a GC. It is guaranteed that there is no further work for this GC.
     /// This is invoked once per GC by one worker thread. `tls` is the worker thread that executes this method.
@@ -756,18 +756,18 @@ impl<VM: VMBinding> CommonPlan<VM> {
             + self.base.get_used_pages()
     }
 
-    pub fn prepare(&mut self, tls: VMWorkerThread, full_heap: bool) {
+    pub fn prepare(&mut self, worker: &mut GCWorker<VM>, full_heap: bool) {
         self.immortal.prepare();
         self.los.prepare(full_heap);
-        self.prepare_nonmoving_space(full_heap);
-        self.base.prepare(tls, full_heap)
+        self.prepare_nonmoving_space(worker, full_heap);
+        self.base.prepare(worker.tls, full_heap)
     }
 
-    pub fn release(&mut self, tls: VMWorkerThread, full_heap: bool) {
+    pub fn release(&mut self, worker: &mut GCWorker<VM>, full_heap: bool) {
         self.immortal.release();
         self.los.release(full_heap);
-        self.release_nonmoving_space(full_heap);
-        self.base.release(tls, full_heap)
+        self.release_nonmoving_space(worker, full_heap);
+        self.base.release(worker.tls, full_heap)
     }
 
     pub(crate) fn schedule_unlog_bits_op(&mut self, unlog_bits_op: UnlogBitsOperation) {
@@ -836,26 +836,26 @@ impl<VM: VMBinding> CommonPlan<VM> {
         }
     }
 
-    fn prepare_nonmoving_space(&mut self, _full_heap: bool) {
+    fn prepare_nonmoving_space(&mut self, worker: &mut GCWorker<VM>, _full_heap: bool) {
         cfg_if::cfg_if! {
             if #[cfg(feature = "immortal_as_nonmoving")] {
                 self.nonmoving.prepare();
             } else if #[cfg(feature = "marksweep_as_nonmoving")] {
                 self.nonmoving.prepare(_full_heap);
             } else {
-                self.nonmoving.prepare(_full_heap, None, UnlogBitsOperation::NoOp);
+                self.nonmoving.prepare(worker, _full_heap, None, UnlogBitsOperation::NoOp);
             }
         }
     }
 
-    fn release_nonmoving_space(&mut self, _full_heap: bool) {
+    fn release_nonmoving_space(&mut self, worker: &mut GCWorker<VM>, _full_heap: bool) {
         cfg_if::cfg_if! {
             if #[cfg(feature = "immortal_as_nonmoving")] {
                 self.nonmoving.release();
             } else if #[cfg(feature = "marksweep_as_nonmoving")] {
                 self.nonmoving.prepare(_full_heap);
             } else {
-                self.nonmoving.release(_full_heap, UnlogBitsOperation::NoOp);
+                self.nonmoving.release(worker, _full_heap, UnlogBitsOperation::NoOp);
             }
         }
     }

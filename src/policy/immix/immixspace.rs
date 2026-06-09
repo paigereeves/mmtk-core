@@ -10,6 +10,8 @@ use crate::policy::space::{CommonSpace, Space};
 use crate::util::alloc::allocator::AllocationOptions;
 use crate::util::alloc::allocator::AllocatorContext;
 use crate::util::constants::LOG_BYTES_IN_PAGE;
+#[cfg(not(feature = "single_worker"))]
+use crate::util::epilogue;
 use crate::util::heap::chunk_map::*;
 use crate::util::heap::BlockPageResource;
 use crate::util::heap::PageResource;
@@ -21,7 +23,7 @@ use crate::util::metadata::vo_bit;
 use crate::util::metadata::{self, MetadataSpec};
 use crate::util::object_enum::ObjectEnumerator;
 use crate::util::object_forwarding;
-use crate::util::{copy::*, epilogue, object_enum};
+use crate::util::{copy::*, object_enum};
 use crate::util::{Address, ObjectReference};
 use crate::vm::*;
 use crate::{
@@ -426,6 +428,7 @@ impl<VM: VMBinding> ImmixSpace<VM> {
 
     pub(crate) fn prepare(
         &mut self,
+        worker: &mut GCWorker<VM>,
         major_gc: bool,
         plan_stats: Option<StatsForDefrag>,
         unlog_bits_op: UnlogBitsOperation,
@@ -445,22 +448,7 @@ impl<VM: VMBinding> ImmixSpace<VM> {
             }
 
             // Prepare each block for GC
-            let threshold = self.defrag.defrag_spill_threshold.load(Ordering::Acquire);
-            // # Safety: ImmixSpace reference is always valid within this collection cycle.
-            let space = unsafe { &*(self as *const Self) };
-            let work_packets = self.chunk_map.generate_tasks(|chunk| {
-                Box::new(PrepareBlockState {
-                    space,
-                    chunk,
-                    defrag_threshold: if space.in_defrag() {
-                        Some(threshold)
-                    } else {
-                        None
-                    },
-                    unlog_bits_op,
-                })
-            });
-            self.scheduler().work_buckets[WorkBucketStage::Prepare].bulk_add(work_packets);
+            self.prepare_blocks(worker, unlog_bits_op);
 
             if !super::BLOCK_ONLY {
                 self.line_mark_state.fetch_add(1, Ordering::AcqRel);
@@ -499,17 +487,67 @@ impl<VM: VMBinding> ImmixSpace<VM> {
                 None
             };
 
-            if let Some(scope) = maybe_scope {
-                let work_packets = self
-                    .chunk_map
-                    .generate_tasks(|chunk| Box::new(ClearVOBitsAfterPrepare { chunk, scope }));
-                self.scheduler.work_buckets[WorkBucketStage::ClearVOBits].bulk_add(work_packets);
+            if cfg!(not(feature = "single_worker")) {
+                if let Some(scope) = maybe_scope {
+                    let work_packets = self
+                        .chunk_map
+                        .generate_tasks(|chunk| Box::new(ClearVOBitsAfterPrepare { chunk, scope }));
+                    self.scheduler.work_buckets[WorkBucketStage::ClearVOBits]
+                        .bulk_add(work_packets);
+                }
+            } else {
+                for chunk in self.chunk_map.all_chunks() {
+                    let mut work_packet = ClearVOBitsAfterPrepare { chunk, scope };
+                    work_packet.do_work(worker, worker.mmtk);
+                }
+            }
+        }
+    }
+
+    /// Prepare block state for GC
+    fn prepare_blocks(&self, worker: &mut GCWorker<VM>, unlog_bits_op: UnlogBitsOperation) {
+        let threshold = self.defrag.defrag_spill_threshold.load(Ordering::Acquire);
+        // # Safety: ImmixSpace reference is always valid within this collection cycle.
+        let space = unsafe { &*(self as *const Self) };
+
+        if cfg!(not(feature = "single_worker")) {
+            let work_packets = self.chunk_map.generate_tasks(|chunk| {
+                Box::new(PrepareBlockState {
+                    space,
+                    chunk,
+                    defrag_threshold: if space.in_defrag() {
+                        Some(threshold)
+                    } else {
+                        None
+                    },
+                    unlog_bits_op,
+                })
+            });
+            self.scheduler().work_buckets[WorkBucketStage::Prepare].bulk_add(work_packets);
+        } else {
+            for chunk in self.chunk_map.all_chunks() {
+                let mut work_packet = PrepareBlockState {
+                    space,
+                    chunk,
+                    defrag_threshold: if space.in_defrag() {
+                        Some(threshold)
+                    } else {
+                        None
+                    },
+                    unlog_bits_op,
+                };
+                work_packet.do_work(worker, worker.mmtk);
             }
         }
     }
 
     /// Release for the immix space.
-    pub(crate) fn release(&mut self, major_gc: bool, unlog_bits_op: UnlogBitsOperation) {
+    pub(crate) fn release(
+        &mut self,
+        worker: &mut GCWorker<VM>,
+        major_gc: bool,
+        unlog_bits_op: UnlogBitsOperation,
+    ) {
         if major_gc {
             // Update line_unavail_state for hole searching after this GC.
             if !super::BLOCK_ONLY {
@@ -524,8 +562,12 @@ impl<VM: VMBinding> ImmixSpace<VM> {
             self.reusable_blocks.reset();
         }
         // Sweep chunks and blocks
-        let work_packets = self.generate_sweep_tasks(unlog_bits_op);
-        self.scheduler().work_buckets[WorkBucketStage::Release].bulk_add(work_packets);
+        if cfg!(not(feature = "single_worker")) {
+            let work_packets = self.generate_sweep_tasks(unlog_bits_op);
+            self.scheduler().work_buckets[WorkBucketStage::Release].bulk_add(work_packets);
+        } else {
+            self.sweep_chunks(worker, unlog_bits_op);
+        }
 
         self.lines_consumed.store(0, Ordering::Relaxed);
     }
@@ -545,6 +587,7 @@ impl<VM: VMBinding> ImmixSpace<VM> {
         self.defrag.mark_histograms.lock().clear();
         // # Safety: ImmixSpace reference is always valid within this collection cycle.
         let space = unsafe { &*(self as *const Self) };
+        #[cfg(not(feature = "single_worker"))]
         let epilogue = Arc::new(FlushPageResource {
             space,
             counter: AtomicUsize::new(0),
@@ -554,11 +597,28 @@ impl<VM: VMBinding> ImmixSpace<VM> {
                 space,
                 chunk,
                 unlog_bits_op,
+                #[cfg(not(feature = "single_worker"))]
                 epilogue: epilogue.clone(),
             })
         });
+        #[cfg(not(feature = "single_worker"))]
         epilogue.counter.store(tasks.len(), Ordering::SeqCst);
         tasks
+    }
+
+    fn sweep_chunks(&self, worker: &mut GCWorker<VM>, unlog_bits_op: UnlogBitsOperation) {
+        self.defrag.mark_histograms.lock().clear();
+        // # Safety: ImmixSpace reference is always valid within this collection cycle.
+        let space = unsafe { &*(self as *const Self) };
+        for chunk in self.chunk_map.all_chunks() {
+            let mut work_packet = SweepChunk {
+                space,
+                chunk,
+                unlog_bits_op,
+            };
+            work_packet.do_work(worker, worker.mmtk);
+        }
+        self.flush_page_resource();
     }
 
     /// Release a block.
@@ -980,6 +1040,7 @@ struct SweepChunk<VM: VMBinding> {
     chunk: Chunk,
     unlog_bits_op: UnlogBitsOperation,
     /// A destructor invoked when all `SweepChunk` packets are finished.
+    #[cfg(not(feature = "single_worker"))]
     epilogue: Arc<FlushPageResource<VM>>,
 }
 
@@ -1061,16 +1122,19 @@ impl<VM: VMBinding> GCWork<VM> for SweepChunk<VM> {
         self.unlog_bits_op
             .execute::<VM>(self.chunk.start(), Chunk::BYTES);
 
+        #[cfg(not(feature = "single_worker"))]
         self.epilogue.finish_one_work_packet();
     }
 }
 
 /// Count number of remaining work pacets, and flush page resource if all packets are finished.
+#[cfg(not(feature = "single_worker"))]
 struct FlushPageResource<VM: VMBinding> {
     space: &'static ImmixSpace<VM>,
     counter: AtomicUsize,
 }
 
+#[cfg(not(feature = "single_worker"))]
 impl<VM: VMBinding> FlushPageResource<VM> {
     /// Called after a related work packet is finished.
     fn finish_one_work_packet(&self) {
@@ -1082,6 +1146,7 @@ impl<VM: VMBinding> FlushPageResource<VM> {
     }
 }
 
+#[cfg(not(feature = "single_worker"))]
 impl<VM: VMBinding> Drop for FlushPageResource<VM> {
     fn drop(&mut self) {
         epilogue::debug_assert_counter_zero(&self.counter, "FlushPageResource::counter");

@@ -102,12 +102,13 @@ impl<VM: VMBinding> Plan for GenImmix<VM> {
     }
 
     fn schedule_collection(&'static self, scheduler: &GCWorkScheduler<Self::VM>) {
+        use crate::policy::gc_work::DEFAULT_TRACE;
         let is_full_heap = self.requires_full_heap_collection();
         probe!(mmtk, gen_full_heap, is_full_heap);
 
         if !is_full_heap {
             info!("Nursery GC");
-            scheduler.schedule_common_work::<GenImmixNurseryGCWorkContext<VM>>(self);
+            scheduler.schedule_common_work::<GenImmixNurseryGCWorkContext<VM>, DEFAULT_TRACE>(self);
         } else {
             info!("Full heap GC");
             crate::plan::immix::Immix::schedule_immix_full_heap_collection::<
@@ -122,11 +123,12 @@ impl<VM: VMBinding> Plan for GenImmix<VM> {
         &super::mutator::ALLOCATOR_MAPPING
     }
 
-    fn prepare(&mut self, tls: VMWorkerThread) {
+    fn prepare(&mut self, worker: &mut GCWorker<VM>) {
         let full_heap = !self.gen.is_current_gc_nursery();
-        self.gen.prepare(tls);
+        self.gen.prepare(worker);
         if full_heap {
             self.immix_space.prepare(
+                worker,
                 full_heap,
                 Some(StatsForDefrag::new(self)),
                 // Bulk clear unlog bits so that we will reconstruct them.
@@ -138,11 +140,12 @@ impl<VM: VMBinding> Plan for GenImmix<VM> {
         }
     }
 
-    fn release(&mut self, tls: VMWorkerThread) {
+    fn release(&mut self, worker: &mut GCWorker<VM>) {
         let full_heap = !self.gen.is_current_gc_nursery();
-        self.gen.release(tls);
+        self.gen.release(worker);
         if full_heap {
             self.immix_space.release(
+                worker,
                 full_heap,
                 // We reconstructred unlog bits during tracing.  Keep them.
                 UnlogBitsOperation::NoOp,

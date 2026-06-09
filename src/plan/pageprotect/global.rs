@@ -40,20 +40,21 @@ impl<VM: VMBinding> Plan for PageProtect<VM> {
     }
 
     fn schedule_collection(&'static self, scheduler: &GCWorkScheduler<VM>) {
-        scheduler.schedule_common_work::<PPGCWorkContext<VM>>(self);
+        use crate::policy::gc_work::DEFAULT_TRACE;
+        scheduler.schedule_common_work::<PPGCWorkContext<VM>, DEFAULT_TRACE>(self);
     }
 
     fn get_allocator_mapping(&self) -> &'static EnumMap<AllocationSemantics, AllocatorSelector> {
         &ALLOCATOR_MAPPING
     }
 
-    fn prepare(&mut self, tls: VMWorkerThread) {
-        self.common.prepare(tls, true);
+    fn prepare(&mut self, worker: &mut GCWorker<VM>) {
+        self.common.prepare(worker, true);
         self.space.prepare(true);
     }
 
-    fn release(&mut self, tls: VMWorkerThread) {
-        self.common.release(tls, true);
+    fn release(&mut self, worker: &mut GCWorker<VM>) {
+        self.common.release(worker, true);
         self.space.release(true);
     }
 

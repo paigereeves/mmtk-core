@@ -7,9 +7,13 @@ use crate::vm::VMBinding;
 
 use super::global::StickyImmix;
 
-pub struct StickyImmixNurseryGCWorkContext<VM: VMBinding>(std::marker::PhantomData<VM>);
+pub struct StickyImmixNurseryGCWorkContext<VM: VMBinding, const KIND: TraceKind>(
+    std::marker::PhantomData<VM>,
+);
 
-impl<VM: VMBinding> crate::scheduler::GCWorkContext for StickyImmixNurseryGCWorkContext<VM> {
+impl<VM: VMBinding, const KIND: TraceKind> crate::scheduler::GCWorkContext
+    for StickyImmixNurseryGCWorkContext<VM, KIND>
+{
     type VM = VM;
     type PlanType = StickyImmix<VM>;
     #[cfg(feature = "single_worker")]

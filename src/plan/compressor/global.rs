@@ -11,7 +11,7 @@ use crate::plan::tracing::gc_work::weakref::{
 use crate::plan::{AllocationSemantics, Plan, PlanConstraints};
 use crate::policy::compressor::CompressorSpace;
 use crate::policy::space::Space;
-use crate::scheduler::gc_work::*;
+use crate::scheduler::{gc_work::*, GCWorker};
 use crate::scheduler::{GCWorkScheduler, WorkBucketStage};
 use crate::util::alloc::allocators::AllocatorSelector;
 use crate::util::heap::gc_trigger::SpaceStats;
@@ -63,13 +63,13 @@ impl<VM: VMBinding> Plan for Compressor<VM> {
         &mut self.common.base
     }
 
-    fn prepare(&mut self, tls: VMWorkerThread) {
-        self.common.prepare(tls, true);
+    fn prepare(&mut self, worker: &mut GCWorker<VM>) {
+        self.common.prepare(worker, true);
         self.compressor_space.prepare();
     }
 
-    fn release(&mut self, tls: VMWorkerThread) {
-        self.common.release(tls, true);
+    fn release(&mut self, worker: &mut GCWorker<VM>) {
+        self.common.release(worker, true);
         self.compressor_space.release();
     }
 

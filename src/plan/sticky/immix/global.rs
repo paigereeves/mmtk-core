@@ -5,12 +5,14 @@ use crate::plan::global::CreateSpecificPlanArgs;
 use crate::plan::immix;
 use crate::plan::PlanConstraints;
 use crate::policy::gc_work::TraceKind;
+use crate::policy::gc_work::DEFAULT_TRACE;
 use crate::policy::gc_work::TRACE_KIND_TRANSITIVE_PIN;
 use crate::policy::immix::defrag::StatsForDefrag;
 use crate::policy::immix::ImmixSpace;
 use crate::policy::immix::TRACE_KIND_FAST;
 use crate::policy::sft::SFT;
 use crate::policy::space::Space;
+use crate::scheduler::GCWorker;
 use crate::util::copy::CopyConfig;
 use crate::util::copy::CopySelector;
 use crate::util::copy::CopySemantics;
@@ -95,7 +97,7 @@ impl<VM: VMBinding> Plan for StickyImmix<VM> {
         if !is_full_heap {
             info!("Nursery GC");
             // nursery GC -- we schedule it
-            scheduler.schedule_common_work::<StickyImmixNurseryGCWorkContext<VM>>(self);
+            scheduler.schedule_common_work::<StickyImmixNurseryGCWorkContext<VM, DEFAULT_TRACE>, DEFAULT_TRACE>(self);
         } else {
             info!("Full heap GC");
             use crate::plan::immix::Immix;
@@ -115,10 +117,11 @@ impl<VM: VMBinding> Plan for StickyImmix<VM> {
         &super::mutator::ALLOCATOR_MAPPING
     }
 
-    fn prepare(&mut self, tls: crate::util::VMWorkerThread) {
+    fn prepare(&mut self, worker: &mut GCWorker<VM>) {
         if self.is_current_gc_nursery() {
             // Prepare both large object space and immix space
             self.immix.immix_space.prepare(
+                worker,
                 false,
                 Some(StatsForDefrag::new(self)),
                 // We don't do anything special to unlog bits during nursery GC
@@ -129,16 +132,17 @@ impl<VM: VMBinding> Plan for StickyImmix<VM> {
         } else {
             self.full_heap_gc_count.lock().unwrap().inc();
             self.immix.prepare_inner(
-                tls,
+                worker,
                 // We will reconstruct unlog bits during tracing.
                 UnlogBitsOperation::BulkClear,
             );
         }
     }
 
-    fn release(&mut self, tls: crate::util::VMWorkerThread) {
+    fn release(&mut self, worker: &mut GCWorker<VM>) {
         if self.is_current_gc_nursery() {
             self.immix.immix_space.release(
+                worker,
                 false,
                 // We don't do anything special to unlog bits during nursery GC
                 // because ProcessModBuf has set the unlog bits back.
@@ -147,7 +151,7 @@ impl<VM: VMBinding> Plan for StickyImmix<VM> {
             self.immix.common.los.release(false);
         } else {
             self.immix.release_inner(
-                tls,
+                worker,
                 // We reconstructred unlog bits during tracing.  Keep them.
                 UnlogBitsOperation::NoOp,
             );

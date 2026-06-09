@@ -1,9 +1,9 @@
 use super::worker::*;
+#[cfg(feature = "single_worker")]
+use crate::plan::PlanTraceObject;
 use crate::plan::tracing::gc_work::root::DefaultRootsWorkFactory;
 use crate::vm::{RootsWorkFactory, VMBinding};
 use crate::{mmtk::MMTK, plan::tracing::Trace};
-#[cfg(feature = "single_worker")]
-use crate::plan::PlanTraceObject;
 #[cfg(feature = "work_packet_stats")]
 use std::any::{type_name, TypeId};
 

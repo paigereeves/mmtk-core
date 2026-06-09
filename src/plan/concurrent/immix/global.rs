@@ -178,12 +178,13 @@ impl<VM: VMBinding> Plan for ConcurrentImmix<VM> {
         &ALLOCATOR_MAPPING
     }
 
-    fn prepare(&mut self, tls: VMWorkerThread) {
+    fn prepare(&mut self, worker: &mut GCWorker<VM>) {
         let pause = self.current_pause().unwrap();
         match pause {
             Pause::Full => {
-                self.common.prepare(tls, true);
+                self.common.prepare(worker, true);
                 self.immix_space.prepare(
+                    worker,
                     true,
                     Some(StatsForDefrag::new(self)),
                     // Ignore unlog bits in full GCs because unlog bits should be all 0.
@@ -192,13 +193,14 @@ impl<VM: VMBinding> Plan for ConcurrentImmix<VM> {
             }
             Pause::InitialMark => {
                 self.immix_space.prepare(
+                    worker,
                     true,
                     Some(StatsForDefrag::new(self)),
                     // Bulk set log bits so SATB barrier will be triggered on the existing objects.
                     UnlogBitsOperation::BulkSet,
                 );
 
-                self.common.prepare(tls, true);
+                self.common.prepare(worker, true);
                 // Bulk set log bits so SATB barrier will be triggered on the existing objects.
                 self.common
                     .schedule_unlog_bits_op(UnlogBitsOperation::BulkSet);
@@ -207,18 +209,19 @@ impl<VM: VMBinding> Plan for ConcurrentImmix<VM> {
         }
     }
 
-    fn release(&mut self, tls: VMWorkerThread) {
+    fn release(&mut self, worker: &mut GCWorker<VM>) {
         let pause = self.current_pause().unwrap();
         match pause {
             Pause::InitialMark => (),
             Pause::Full | Pause::FinalMark => {
                 self.immix_space.release(
+                    worker,
                     true,
                     // Bulk clear log bits so SATB barrier will not be triggered.
                     UnlogBitsOperation::BulkClear,
                 );
 
-                self.common.release(tls, true);
+                self.common.release(worker, true);
 
                 if pause == Pause::FinalMark {
                     // Bulk clear log bits so SATB barrier will not be triggered.

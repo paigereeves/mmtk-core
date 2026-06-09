@@ -64,13 +64,13 @@ impl<VM: VMBinding> Plan for MarkCompact<VM> {
         &self.common
     }
 
-    fn prepare(&mut self, _tls: VMWorkerThread) {
-        self.common.prepare(_tls, true);
+    fn prepare(&mut self, worker: &mut GCWorker<VM>) {
+        self.common.prepare(worker, true);
         self.mc_space.prepare();
     }
 
-    fn release(&mut self, _tls: VMWorkerThread) {
-        self.common.release(_tls, true);
+    fn release(&mut self, worker: &mut GCWorker<VM>) {
+        self.common.release(worker, true);
         self.mc_space.release();
     }
 

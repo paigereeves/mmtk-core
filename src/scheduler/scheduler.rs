@@ -12,6 +12,7 @@ use crate::mmtk::MMTK;
 use crate::plan::tracing::gc_work::weakref::{
     VMForwardWeakRefs, VMPostForwarding, VMProcessWeakRefs,
 };
+use crate::policy::gc_work::TraceKind;
 use crate::util::opaque_pointer::*;
 use crate::util::options::AffinityKind;
 use crate::vm::Collection;
@@ -147,10 +148,13 @@ impl<VM: VMBinding> GCWorkScheduler<VM> {
     }
 
     /// Schedule all the common work packets
-    pub fn schedule_common_work<C: GCWorkContext<VM = VM>>(&self, plan: &'static C::PlanType) {
+    pub fn schedule_common_work<C: GCWorkContext<VM = VM>, const KIND: TraceKind>(
+        &self,
+        plan: &'static C::PlanType,
+    ) {
         #[cfg(feature = "single_worker")]
         {
-            self.schedule_single_threaded_collection::<C>(plan);
+            self.schedule_single_threaded_collection::<C, KIND>(plan);
         }
         #[cfg(not(feature = "single_worker"))]
         {
@@ -186,7 +190,8 @@ impl<VM: VMBinding> GCWorkScheduler<VM> {
                 };
                 self.work_buckets[WorkBucketStage::SoftRefClosure]
                     .add(SoftRefProcessing::<C::DefaultTrace>::new());
-                self.work_buckets[WorkBucketStage::WeakRefClosure].add(WeakRefProcessing::<VM>::new());
+                self.work_buckets[WorkBucketStage::WeakRefClosure]
+                    .add(WeakRefProcessing::<VM>::new());
                 self.work_buckets[WorkBucketStage::PhantomRefClosure]
                     .add(PhantomRefProcessing::<VM>::new());
 
@@ -248,11 +253,18 @@ impl<VM: VMBinding> GCWorkScheduler<VM> {
     }
 
     #[cfg(feature = "single_worker")]
-    fn schedule_single_threaded_collection<C: GCWorkContext<VM = VM>>(&self, plan: &'static C::PlanType) {
-        assert!(*plan.base().options.no_reference_types);
-        assert!(*plan.base().options.no_finalizer);
+    fn schedule_single_threaded_collection<C: GCWorkContext<VM = VM>, const KIND: TraceKind>(
+        &self,
+        plan: &'static C::PlanType,
+    ) {
+        // assert!(*plan.base().options.no_reference_types);
+        // assert!(*plan.base().options.no_finalizer);
         use crate::scheduler::single_thread_gc_work::STDoCollection;
-        self.work_buckets[WorkBucketStage::Unconstrained].add(STDoCollection::<C::VM, C::STPlanType>::new());
+        self.work_buckets[WorkBucketStage::Unconstrained].add(STDoCollection::<
+            C::VM,
+            C::STPlanType,
+            KIND,
+        >::new());
     }
 
     fn are_buckets_drained(&self, buckets: &[WorkBucketStage]) -> bool {

@@ -60,21 +60,21 @@ impl<VM: VMBinding> CommonGenPlan<VM> {
     }
 
     /// Prepare Gen. This should be called by a single thread in GC prepare work.
-    pub fn prepare(&mut self, tls: VMWorkerThread) {
+    pub fn prepare(&mut self, worker: &mut GCWorker<VM>) {
         let full_heap = !self.is_current_gc_nursery();
         if full_heap {
             self.full_heap_gc_count.lock().unwrap().inc();
         }
-        self.common.prepare(tls, full_heap);
+        self.common.prepare(worker, full_heap);
         self.nursery.prepare(true);
         self.nursery
             .set_copy_for_sft_trace(Some(CopySemantics::PromoteToMature));
     }
 
     /// Release Gen. This should be called by a single thread in GC release work.
-    pub fn release(&mut self, tls: VMWorkerThread) {
+    pub fn release(&mut self, worker: &mut GCWorker<VM>) {
         let full_heap = !self.is_current_gc_nursery();
-        self.common.release(tls, full_heap);
+        self.common.release(worker, full_heap);
         self.nursery.release();
     }
 
