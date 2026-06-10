@@ -544,7 +544,7 @@ impl<VM: VMBinding> ImmixSpace<VM> {
     /// Release for the immix space.
     pub(crate) fn release(
         &mut self,
-        worker: &mut GCWorker<VM>,
+        _worker: &mut GCWorker<VM>,
         major_gc: bool,
         unlog_bits_op: UnlogBitsOperation,
     ) {
@@ -562,12 +562,14 @@ impl<VM: VMBinding> ImmixSpace<VM> {
             self.reusable_blocks.reset();
         }
         // Sweep chunks and blocks
-        if cfg!(not(feature = "single_worker")) {
+        #[cfg(not(feature = "single_worker"))]
+        {
             let work_packets = self.generate_sweep_tasks(unlog_bits_op);
             self.scheduler().work_buckets[WorkBucketStage::Release].bulk_add(work_packets);
-        } else {
-            self.sweep_chunks(worker, unlog_bits_op);
         }
+
+        #[cfg(feature = "single_worker")]
+        self.sweep_chunks(_worker, unlog_bits_op);
 
         self.lines_consumed.store(0, Ordering::Relaxed);
     }
@@ -606,6 +608,7 @@ impl<VM: VMBinding> ImmixSpace<VM> {
         tasks
     }
 
+    #[cfg(feature = "single_worker")]
     fn sweep_chunks(&self, worker: &mut GCWorker<VM>, unlog_bits_op: UnlogBitsOperation) {
         self.defrag.mark_histograms.lock().clear();
         // # Safety: ImmixSpace reference is always valid within this collection cycle.

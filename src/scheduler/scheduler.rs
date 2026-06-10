@@ -257,8 +257,7 @@ impl<VM: VMBinding> GCWorkScheduler<VM> {
         &self,
         plan: &'static C::PlanType,
     ) {
-        // assert!(*plan.base().options.no_reference_types);
-        // assert!(*plan.base().options.no_finalizer);
+        assert!(*plan.base().options.no_reference_types);
         use crate::scheduler::single_thread_gc_work::STDoCollection;
         self.work_buckets[WorkBucketStage::Unconstrained].add(STDoCollection::<
             C::VM,
