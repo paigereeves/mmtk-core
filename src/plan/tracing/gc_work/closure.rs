@@ -48,7 +48,12 @@ impl<T: Trace> ProcessSlots<T> {
                 }
             };
 
-        for slot in self.slots.iter() {
+        for i in 0..self.slots.len() {
+            let slot_pf_index = i + 8;
+            if slot_pf_index < self.slots.len() {
+                self.slots[slot_pf_index].prefetch_load();
+            }
+            let slot = self.slots[i];
             if let Some(object) = slot.load() {
                 trace.trace_object(worker, object, &mut |object| {
                     <T::VM as VMBinding>::VMScanning::scan_object(tls, object, &mut |slot| {
