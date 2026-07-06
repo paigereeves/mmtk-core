@@ -3,9 +3,9 @@ use std::marker::PhantomData;
 use crate::{
     plan::{
         tracing::{gc_work::DefaultObjectTracerContext, SlotOfTrace, Trace},
-        VectorObjectQueue, VectorQueue,
+        VectorQueue,
     },
-    scheduler::{GCWork, GCWorker, GCWorkerShared, WorkBucketStage},
+    scheduler::{GCWork, GCWorker, GCWorkerShared, WorkBucketStage, EDGES_WORK_BUFFER_SIZE},
     util::{ObjectReference, VMWorkerThread},
     vm::{slot::Slot, ObjectTracerContext, Scanning, VMBinding},
     MMTK,
@@ -19,16 +19,19 @@ use crate::{
 /// scan newly traced objects.
 pub struct ProcessSlots<T: Trace> {
     slots: Vec<SlotOfTrace<T>>,
+    pushes: u32,
     bucket: WorkBucketStage,
 }
 
 impl<T: Trace> ProcessSlots<T> {
+    #[cfg(not(feature = "edge_enqueueing"))]
     const SCAN_OBJECTS_IMMEDIATELY: bool = true;
 
     pub fn new(slots: Vec<SlotOfTrace<T>>, bucket: WorkBucketStage) -> Self {
-        Self { slots, bucket }
+        Self { slots, pushes: 0, bucket }
     }
 
+    #[cfg(not(feature = "edge_enqueueing"))]
     fn process_slots(
         &mut self,
         worker: &mut GCWorker<T::VM>,
@@ -48,6 +51,49 @@ impl<T: Trace> ProcessSlots<T> {
         queue
     }
 
+    #[cfg(feature = "edge_enqueueing")]
+    fn process_slots(
+        &mut self,
+        worker: &mut GCWorker<T::VM>,
+        trace: T,
+    ) {
+
+        while let Some(slot) = self.slots.pop() {
+            if let Some(object) = slot.load() {
+                let tls = worker.tls;
+
+                let new_object = trace.trace_object(worker, object,  &mut |enqueued_object| {
+                    debug_assert!(
+                        <T::VM as VMBinding>::VMScanning::support_slot_enqueuing(
+                            tls,
+                            enqueued_object
+                        ),
+                        "Object {enqueued_object} does not support slot enqueuing."
+                    );
+                    let mut closure = |slot: SlotOfTrace<T>| {
+                        let Some(_) = slot.load() else { return };
+                        self.slots.push(slot);
+                        self.pushes += 1;
+                    };
+                    <T::VM as VMBinding>::VMScanning::scan_object(tls, enqueued_object, &mut closure);
+                    trace.post_scan_object(enqueued_object);
+                });
+                
+                // Note slots len may exceed EDGES_WORK_BUFFER_SIZE as len checked between objects, not slots.
+                if self.slots.len() >= EDGES_WORK_BUFFER_SIZE
+                    || self.pushes >= (EDGES_WORK_BUFFER_SIZE / 2) as u32
+                {
+                    self.flush_half(worker);
+                }
+
+                if T::may_move_objects() && new_object != object {
+                    slot.store(new_object);
+                }
+            }
+        }
+    }
+
+    #[cfg(not(feature = "edge_enqueueing"))]
     fn flush(&mut self, worker: &mut GCWorker<T::VM>, mut queue: VectorQueue<ObjectReference>) {
         if queue.is_empty() {
             return;
@@ -61,6 +107,34 @@ impl<T: Trace> ProcessSlots<T> {
         } else {
             worker.add_work(self.bucket, work);
         }
+    }
+
+    #[cfg(feature = "edge_enqueueing")]
+    fn flush(&mut self, worker: &mut GCWorker<T::VM>) {
+        if !self.slots.is_empty() {
+            let slots = std::mem::take(&mut self.slots);
+            let w = Self::new(slots, self.bucket);
+            worker.add_work(self.bucket, w);
+        }
+        self.pushes = 0;
+    }
+
+    #[cfg(feature = "edge_enqueueing")]
+    fn flush_half(&mut self, worker: &mut GCWorker<T::VM>) {
+        let slots = if self.slots.len() > 1 {
+            let half = self.slots.len() / 2;
+            self.slots.split_off(half)
+        } else {
+            return;
+        };
+
+        self.pushes = self.slots.len() as u32;
+        if slots.is_empty() {
+            return;
+        }
+
+        let w = Self::new(slots, self.bucket);
+        worker.add_work(self.bucket, w);
     }
 }
 
@@ -78,9 +152,17 @@ impl<T: Trace> GCWork<T::VM> for ProcessSlots<T> {
             }
         }
 
-        let queue = self.process_slots(worker, trace);
+        #[cfg(feature = "edge_enqueueing")]
+        {
+            self.process_slots(worker, trace);
+            self.flush(worker);
+        }
+        #[cfg(not(feature = "edge_enqueueing"))]
+        {
+            let queue = self.process_slots(worker, trace);
 
-        self.flush(worker, queue);
+            self.flush(worker, queue);
+        }
     }
 }
 
