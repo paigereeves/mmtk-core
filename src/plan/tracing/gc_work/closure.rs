@@ -23,48 +23,97 @@ pub struct ProcessSlots<T: Trace> {
 }
 
 impl<T: Trace> ProcessSlots<T> {
+    #[cfg(not(feature = "edge_enqueueing"))]
+    const SCAN_OBJECTS_IMMEDIATELY: bool = true;
+
     pub fn new(slots: Vec<SlotOfTrace<T>>, bucket: WorkBucketStage) -> Self {
         Self { slots, bucket }
     }
 
-    fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T) {
-        debug_assert!(!T::may_move_objects());
-
-        let mut slot_queue = VectorQueue::<SlotOfTrace<T>>::new();
-        let tls = worker.tls;
-        let mut work_packet_buffer: Vec<ProcessSlots<T>> = Vec::new();
-
-        let flush_slot_queue =
-            |slots: &mut VectorQueue<_>, work_packet_buffer: &mut Vec<ProcessSlots<T>>| {
-                let buffer = slots.take();
-                let work_packet = ProcessSlots::<T>::new(buffer, self.bucket);
-                work_packet_buffer.push(work_packet);
-            };
-
-        let flush_work_packet_buffer =
-            |worker: &mut GCWorker<T::VM>, work_packet_buffer: &mut Vec<ProcessSlots<T>>| {
-                while let Some(work) = work_packet_buffer.pop() {
-                    worker.add_work(self.bucket, work);
-                }
-            };
+    #[cfg(not(feature = "edge_enqueueing"))]
+    fn process_slots(
+        &mut self,
+        worker: &mut GCWorker<T::VM>,
+        trace: T,
+    ) -> VectorQueue<ObjectReference> {
+        let mut queue = VectorObjectQueue::new();
 
         for slot in self.slots.iter() {
             if let Some(object) = slot.load() {
-                trace.trace_object(worker, object, &mut |object| {
-                    <T::VM as VMBinding>::VMScanning::scan_object(tls, object, &mut |slot| {
-                        slot_queue.push(slot);
-                        if slot_queue.is_full() {
-                            flush_slot_queue(&mut slot_queue, &mut work_packet_buffer);
-                        }
-                    });
-                    trace.post_scan_object(object);
+                let new_object = trace.trace_object(worker, object, &mut queue);
+                if T::may_move_objects() && new_object != object {
+                    slot.store(new_object);
+                }
+            }
+        }
+
+        queue
+    }
+
+    #[cfg(feature = "edge_enqueueing")]
+    fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T) {
+        let mut slot_queue = VectorQueue::<SlotOfTrace<T>>::new();
+        let tls = worker.tls;
+
+        for slot in self.slots.iter() {
+            if let Some(object) = slot.load() {
+                let new_object = trace.trace_object(worker, object, &mut |enqueued_object| {
+                    debug_assert!(
+                        <T::VM as VMBinding>::VMScanning::support_slot_enqueuing(
+                            tls,
+                            enqueued_object
+                        ),
+                        "Object {enqueued_object} does not support slot enqueuing."
+                    );
+                    <T::VM as VMBinding>::VMScanning::scan_object(
+                        tls,
+                        enqueued_object,
+                        &mut |slot| {
+                            slot_queue.push(slot);
+                        },
+                    );
+                    trace.post_scan_object(enqueued_object);
                 });
-                flush_work_packet_buffer(worker, &mut work_packet_buffer);
+                if slot_queue.is_full() {
+                    self.flush(worker, &mut slot_queue);
+                }
+
+                if T::may_move_objects() && new_object != object {
+                    slot.store(new_object);
+                }
             }
         }
         if !slot_queue.is_empty() {
-            flush_slot_queue(&mut slot_queue, &mut work_packet_buffer);
-            flush_work_packet_buffer(worker, &mut work_packet_buffer);
+            self.flush(worker, &mut slot_queue);
+        }
+    }
+
+    #[cfg(not(feature = "edge_enqueueing"))]
+    fn flush(&mut self, worker: &mut GCWorker<T::VM>, mut queue: VectorQueue<ObjectReference>) {
+        if queue.is_empty() {
+            return;
+        }
+
+        let queued_objects = queue.take();
+        let mut work = ProcessNodes::<T>::new(queued_objects, self.bucket);
+
+        if Self::SCAN_OBJECTS_IMMEDIATELY {
+            work.do_work(worker, worker.mmtk);
+        } else {
+            worker.add_work(self.bucket, work);
+        }
+    }
+
+    #[cfg(feature = "edge_enqueueing")]
+    fn flush(
+        &self,
+        worker: &mut GCWorker<T::VM>,
+        slot_queue: &mut VectorQueue<<<T as Trace>::VM as VMBinding>::VMSlot>,
+    ) {
+        if !slot_queue.is_empty() {
+            let buffer = slot_queue.take();
+            let work_packet = ProcessSlots::<T>::new(buffer, self.bucket);
+            worker.add_work(self.bucket, work_packet);
         }
     }
 }
@@ -83,7 +132,14 @@ impl<T: Trace> GCWork<T::VM> for ProcessSlots<T> {
             }
         }
 
+        #[cfg(feature = "edge_enqueueing")]
         self.process_slots(worker, trace);
+        #[cfg(not(feature = "edge_enqueueing"))]
+        {
+            let queue = self.process_slots(worker, trace);
+
+            self.flush(worker, queue);
+        }
     }
 }
 
