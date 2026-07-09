@@ -5,7 +5,7 @@ use crate::{
         tracing::{gc_work::DefaultObjectTracerContext, SlotOfTrace, Trace},
         VectorQueue,
     },
-    scheduler::{GCWork, GCWorker, GCWorkerShared, WorkBucketStage},
+    scheduler::{GCWork, GCWorker, GCWorkerShared, WorkBucketStage, EDGES_WORK_BUFFER_SIZE},
     util::{ObjectReference, VMWorkerThread},
     vm::{slot::Slot, ObjectTracerContext, Scanning, VMBinding},
     MMTK,
@@ -19,6 +19,7 @@ use crate::{
 /// scan newly traced objects.
 pub struct ProcessSlots<T: Trace> {
     slots: Vec<SlotOfTrace<T>>,
+    pushes: u32,
     bucket: WorkBucketStage,
 }
 
@@ -27,7 +28,11 @@ impl<T: Trace> ProcessSlots<T> {
     const SCAN_OBJECTS_IMMEDIATELY: bool = true;
 
     pub fn new(slots: Vec<SlotOfTrace<T>>, bucket: WorkBucketStage) -> Self {
-        Self { slots, bucket }
+        Self {
+            slots,
+            pushes: 0,
+            bucket,
+        }
     }
 
     #[cfg(not(feature = "edge_enqueueing"))]
@@ -52,10 +57,9 @@ impl<T: Trace> ProcessSlots<T> {
 
     #[cfg(feature = "edge_enqueueing")]
     fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T) {
-        let mut slot_queue = VectorQueue::<SlotOfTrace<T>>::new();
         let tls = worker.tls;
 
-        for slot in self.slots.iter() {
+        while let Some(slot) = self.slots.pop() {
             if let Some(object) = slot.load() {
                 let new_object = trace.trace_object(worker, object, &mut |enqueued_object| {
                     debug_assert!(
@@ -65,26 +69,27 @@ impl<T: Trace> ProcessSlots<T> {
                         ),
                         "Object {enqueued_object} does not support slot enqueuing."
                     );
+                    let mut closure = |slot: SlotOfTrace<T>| {
+                        self.slots.push(slot);
+                        self.pushes += 1;
+                    };
                     <T::VM as VMBinding>::VMScanning::scan_object(
                         tls,
                         enqueued_object,
-                        &mut |slot| {
-                            slot_queue.push(slot);
-                        },
+                        &mut closure,
                     );
                     trace.post_scan_object(enqueued_object);
                 });
-                if slot_queue.is_full() {
-                    self.flush(worker, &mut slot_queue);
+                if self.slots.len() >= EDGES_WORK_BUFFER_SIZE
+                    || self.pushes >= (EDGES_WORK_BUFFER_SIZE / 2) as u32
+                {
+                    self.flush_half(worker);
                 }
 
                 if T::may_move_objects() && new_object != object {
                     slot.store(new_object);
                 }
             }
-        }
-        if !slot_queue.is_empty() {
-            self.flush(worker, &mut slot_queue);
         }
     }
 
@@ -105,16 +110,21 @@ impl<T: Trace> ProcessSlots<T> {
     }
 
     #[cfg(feature = "edge_enqueueing")]
-    fn flush(
-        &self,
-        worker: &mut GCWorker<T::VM>,
-        slot_queue: &mut VectorQueue<<<T as Trace>::VM as VMBinding>::VMSlot>,
-    ) {
-        if !slot_queue.is_empty() {
-            let buffer = slot_queue.take();
-            let work_packet = ProcessSlots::<T>::new(buffer, self.bucket);
-            worker.add_work(self.bucket, work_packet);
+    fn flush_half(&mut self, worker: &mut GCWorker<T::VM>) {
+        let slots = if self.slots.len() > 1 {
+            let half = self.slots.len() / 2;
+            self.slots.split_off(half)
+        } else {
+            return;
+        };
+
+        self.pushes = self.slots.len() as u32;
+        if slots.is_empty() {
+            return;
         }
+
+        let w = Self::new(slots, self.bucket);
+        worker.add_work(self.bucket, w);
     }
 }
 
