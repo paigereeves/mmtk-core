@@ -65,12 +65,14 @@ impl<T: Trace> ProcessSlots<T> {
                         ),
                         "Object {enqueued_object} does not support slot enqueuing."
                     );
+                    let mut closure = |slot: SlotOfTrace<T>| {
+                        let Some(_) = slot.load() else { return };
+                        slot_queue.push(slot);
+                    };
                     <T::VM as VMBinding>::VMScanning::scan_object(
                         tls,
                         enqueued_object,
-                        &mut |slot| {
-                            slot_queue.push(slot);
-                        },
+                        &mut closure,
                     );
                     trace.post_scan_object(enqueued_object);
                 });
