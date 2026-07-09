@@ -70,6 +70,7 @@ impl<T: Trace> ProcessSlots<T> {
                         "Object {enqueued_object} does not support slot enqueuing."
                     );
                     let mut closure = |slot: SlotOfTrace<T>| {
+                        let Some(_) = slot.load() else { return };
                         self.slots.push(slot);
                         self.pushes += 1;
                     };
