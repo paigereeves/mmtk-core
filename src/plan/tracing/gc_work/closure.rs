@@ -55,7 +55,10 @@ impl<T: Trace> ProcessSlots<T> {
         let mut slot_queue = VectorQueue::<SlotOfTrace<T>>::new();
         let tls = worker.tls;
 
-        for slot in self.slots.iter() {
+        for (i, slot) in self.slots.iter().enumerate() {
+            if let Some(pf_slot) = self.slots.get(i+8) {
+                pf_slot.prefetch_load();
+            }
             if let Some(object) = slot.load() {
                 let new_object = trace.trace_object(worker, object, &mut |enqueued_object| {
                     debug_assert!(

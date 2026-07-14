@@ -136,6 +136,10 @@ impl Address {
     /// The highest possible address.
     pub const MAX: Self = Address(usize::MAX);
 
+    pub fn prefetch(&self) {
+        unsafe { core::arch::x86_64::_mm_prefetch(self.0 as *const i8, core::arch::x86_64::_MM_HINT_NTA);}
+    }
+
     /// creates Address from a pointer
     pub fn from_ptr<T>(ptr: *const T) -> Address {
         Address(ptr as usize)
