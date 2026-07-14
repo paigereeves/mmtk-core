@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{collections::VecDeque, marker::PhantomData};
 
 use crate::{
     plan::{
@@ -18,7 +18,8 @@ use crate::{
 /// moved or forwarded.  It will spawn or immediately run the [`ProcessNodes`] work packet to
 /// scan newly traced objects.
 pub struct ProcessSlots<T: Trace> {
-    slots: Vec<SlotOfTrace<T>>,
+    scan_stack: Vec<SlotOfTrace<T>>,
+    prefetch_queue: VecDeque<SlotOfTrace<T>>,
     pushes: u32,
     bucket: WorkBucketStage,
 }
@@ -27,9 +28,11 @@ impl<T: Trace> ProcessSlots<T> {
     #[cfg(not(feature = "edge_enqueueing"))]
     const SCAN_OBJECTS_IMMEDIATELY: bool = true;
 
-    pub fn new(slots: Vec<SlotOfTrace<T>>, bucket: WorkBucketStage) -> Self {
+    pub fn new(mut slots: Vec<SlotOfTrace<T>>, bucket: WorkBucketStage) -> Self {
+        let prefetch_queue: VecDeque<SlotOfTrace<T>> = slots.split_off(std::cmp::max(slots.len(), 8) - 8).into();
         Self {
-            slots,
+            scan_stack: slots,
+            prefetch_queue,
             pushes: 0,
             bucket,
         }
@@ -55,11 +58,24 @@ impl<T: Trace> ProcessSlots<T> {
         queue
     }
 
+    fn fill_prefetch_queue(&mut self) {
+        while self.prefetch_queue.len() < 8 && !self.scan_stack.is_empty() {
+            if let Some(slot) = self.scan_stack.pop() {
+                slot.prefetch_load();
+                self.prefetch_queue.push_back(slot);
+            }
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.prefetch_queue.len() + self.scan_stack.len()
+    }
+
     #[cfg(feature = "edge_enqueueing")]
     fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T) {
         let tls = worker.tls;
 
-        while let Some(slot) = self.slots.pop() {
+        while let Some(slot) = self.prefetch_queue.pop_front() {
             if let Some(object) = slot.load() {
                 let new_object = trace.trace_object(worker, object, &mut |enqueued_object| {
                     debug_assert!(
@@ -70,7 +86,7 @@ impl<T: Trace> ProcessSlots<T> {
                         "Object {enqueued_object} does not support slot enqueuing."
                     );
                     let mut closure = |slot: SlotOfTrace<T>| {
-                        self.slots.push(slot);
+                        self.scan_stack.push(slot);
                         self.pushes += 1;
                     };
                     <T::VM as VMBinding>::VMScanning::scan_object(
@@ -80,7 +96,7 @@ impl<T: Trace> ProcessSlots<T> {
                     );
                     trace.post_scan_object(enqueued_object);
                 });
-                if self.slots.len() >= EDGES_WORK_BUFFER_SIZE
+                if self.len() >= EDGES_WORK_BUFFER_SIZE
                     || self.pushes >= (EDGES_WORK_BUFFER_SIZE / 2) as u32
                 {
                     self.flush_half(worker);
@@ -90,6 +106,7 @@ impl<T: Trace> ProcessSlots<T> {
                     slot.store(new_object);
                 }
             }
+            self.fill_prefetch_queue();
         }
     }
 
@@ -111,14 +128,16 @@ impl<T: Trace> ProcessSlots<T> {
 
     #[cfg(feature = "edge_enqueueing")]
     fn flush_half(&mut self, worker: &mut GCWorker<T::VM>) {
-        let slots = if self.slots.len() > 1 {
-            let half = self.slots.len() / 2;
-            self.slots.split_off(half)
-        } else {
+        let slots = if self.len() <= 1 {
             return;
+        } else if self.scan_stack.len() >= self.prefetch_queue.len() {
+            let half = (self.scan_stack.len() - self.prefetch_queue.len())/ 2;
+            self.scan_stack.split_off(half)
+        } else {
+            std::mem::take(&mut self.scan_stack)
         };
 
-        self.pushes = self.slots.len() as u32;
+        self.pushes = self.len() as u32;
         if slots.is_empty() {
             return;
         }
@@ -130,7 +149,7 @@ impl<T: Trace> ProcessSlots<T> {
 
 impl<T: Trace> GCWork<T::VM> for ProcessSlots<T> {
     fn do_work(&mut self, worker: &mut GCWorker<T::VM>, mmtk: &'static MMTK<T::VM>) {
-        probe!(mmtk, process_slots, self.slots.len());
+        probe!(mmtk, process_slots, self.len());
 
         let trace = T::from_mmtk(mmtk);
 
