@@ -63,7 +63,6 @@ impl<T: Trace> ProcessSlots<T> {
     fn fill_prefetch_queue(&mut self) {
         while self.prefetch_queue.len() < Self::PFD && !self.scan_stack.is_empty() {
             if let Some(slot) = self.scan_stack.pop() {
-                slot.prefetch_load();
                 self.prefetch_queue.push_back(slot);
             }
         }
