@@ -164,12 +164,16 @@ impl Stats {
             counter.lock().unwrap().phase_change(self.get_phase());
         }
         self.shared.increment_phase();
+        #[cfg(feature = "perf_gc")]
+        perf_ctrl_enable();
     }
 
     pub fn end_gc(&self) {
         if !self.get_gathering_stats() {
             return;
         }
+        #[cfg(feature = "perf_gc")]
+        perf_ctrl_disable();
         let counters = self.counters.lock().unwrap();
         for counter in &(*counters) {
             counter.lock().unwrap().phase_change(self.get_phase());
@@ -236,10 +240,12 @@ impl Stats {
                 ctr.start();
             }
         }
+        #[cfg(feature = "perf_fullex")]
         perf_ctrl_enable();
     }
 
     pub fn stop_all<VM: VMBinding>(&self, mmtk: &'static MMTK<VM>) {
+        #[cfg(feature = "perf_fullex")]
         perf_ctrl_disable();
         self.stop_all_counters();
         self.print_stats(mmtk);
