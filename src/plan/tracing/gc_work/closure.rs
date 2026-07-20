@@ -10,7 +10,6 @@ use crate::{
     vm::{slot::Slot, ObjectTracerContext, Scanning, VMBinding},
     MMTK,
 };
-use std::collections::VecDeque;
 
 /// A work packet for processing slots during a stop-the-world tracing GC and the final mark pause
 /// of a concurrent GC.
@@ -19,7 +18,7 @@ use std::collections::VecDeque;
 /// moved or forwarded.  It will spawn or immediately run the [`ProcessNodes`] work packet to
 /// scan newly traced objects.
 pub struct ProcessSlots<T: Trace> {
-    slots: VecDeque<SlotOfTrace<T>>,
+    slots: smallvec::SmallVec<SlotOfTrace<T>, 4>,
     pushes: u32,
     bucket: WorkBucketStage,
 }
@@ -28,7 +27,7 @@ impl<T: Trace> ProcessSlots<T> {
     #[cfg(not(feature = "edge_enqueueing"))]
     const SCAN_OBJECTS_IMMEDIATELY: bool = true;
 
-    pub fn new(slots: VecDeque<SlotOfTrace<T>>, bucket: WorkBucketStage) -> Self {
+    pub fn new(slots: smallvec::SmallVec<SlotOfTrace<T>, 4>, bucket: WorkBucketStage) -> Self {
         Self {
             slots,
             pushes: 0,
@@ -60,7 +59,8 @@ impl<T: Trace> ProcessSlots<T> {
     fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T) {
         let tls = worker.tls;
 
-        while let Some(slot) = self.slots.pop_front() {
+        while self.slots.len() > 0 {
+            let slot = self.slots.remove(0);
             if let Some(pf_slot) = self.slots.get(31) {
                 pf_slot.prefetch_load();
             }
@@ -74,7 +74,7 @@ impl<T: Trace> ProcessSlots<T> {
                         "Object {enqueued_object} does not support slot enqueuing."
                     );
                     let mut closure = |slot: SlotOfTrace<T>| {
-                        self.slots.push_back(slot);
+                        self.slots.push(slot);
                         self.pushes += 1;
                     };
                     <T::VM as VMBinding>::VMScanning::scan_object(
