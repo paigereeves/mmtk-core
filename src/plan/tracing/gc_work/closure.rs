@@ -61,6 +61,9 @@ impl<T: Trace> ProcessSlots<T> {
         let tls = worker.tls;
 
         while let Some(slot) = self.slots.pop_front() {
+            if let Some(pf_slot) = self.slots.get(31) {
+                pf_slot.prefetch_load();
+            }
             if let Some(object) = slot.load() {
                 let new_object = trace.trace_object(worker, object, &mut |enqueued_object| {
                     debug_assert!(
