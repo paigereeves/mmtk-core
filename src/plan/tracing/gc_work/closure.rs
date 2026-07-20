@@ -10,6 +10,7 @@ use crate::{
     vm::{slot::Slot, ObjectTracerContext, Scanning, VMBinding},
     MMTK,
 };
+use std::collections::VecDeque;
 
 /// A work packet for processing slots during a stop-the-world tracing GC and the final mark pause
 /// of a concurrent GC.
@@ -18,7 +19,7 @@ use crate::{
 /// moved or forwarded.  It will spawn or immediately run the [`ProcessNodes`] work packet to
 /// scan newly traced objects.
 pub struct ProcessSlots<T: Trace> {
-    slots: Vec<SlotOfTrace<T>>,
+    slots: VecDeque<SlotOfTrace<T>>,
     pushes: u32,
     bucket: WorkBucketStage,
 }
@@ -27,7 +28,7 @@ impl<T: Trace> ProcessSlots<T> {
     #[cfg(not(feature = "edge_enqueueing"))]
     const SCAN_OBJECTS_IMMEDIATELY: bool = true;
 
-    pub fn new(slots: Vec<SlotOfTrace<T>>, bucket: WorkBucketStage) -> Self {
+    pub fn new(slots: VecDeque<SlotOfTrace<T>>, bucket: WorkBucketStage) -> Self {
         Self {
             slots,
             pushes: 0,
@@ -59,7 +60,7 @@ impl<T: Trace> ProcessSlots<T> {
     fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T) {
         let tls = worker.tls;
 
-        while let Some(slot) = self.slots.pop() {
+        while let Some(slot) = self.slots.pop_front() {
             if let Some(object) = slot.load() {
                 let new_object = trace.trace_object(worker, object, &mut |enqueued_object| {
                     debug_assert!(
@@ -70,7 +71,7 @@ impl<T: Trace> ProcessSlots<T> {
                         "Object {enqueued_object} does not support slot enqueuing."
                     );
                     let mut closure = |slot: SlotOfTrace<T>| {
-                        self.slots.push(slot);
+                        self.slots.push_back(slot);
                         self.pushes += 1;
                     };
                     <T::VM as VMBinding>::VMScanning::scan_object(
@@ -188,7 +189,7 @@ impl<T: Trace> ProcessNodes<T> {
 
         let flush = |slots: &mut VectorQueue<_>, worker: &mut GCWorker<T::VM>| {
             let buffer = slots.take();
-            let work_packet = ProcessSlots::<T>::new(buffer, self.bucket);
+            let work_packet = ProcessSlots::<T>::new(buffer.into(), self.bucket);
             worker.add_work(self.bucket, work_packet);
         };
 
