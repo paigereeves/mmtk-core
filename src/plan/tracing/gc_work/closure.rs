@@ -59,8 +59,12 @@ impl<T: Trace> ProcessSlots<T> {
     #[cfg(feature = "edge_enqueueing")]
     fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T) {
         let tls = worker.tls;
-
-        while let Some(slot) = self.slots.pop_front() {
+        let mut top_slot = self.slots.pop_front();
+        while let Some(slot) = if top_slot.is_some() {
+            top_slot.take()
+        } else {
+            self.slots.pop_front()
+        } {
             if let Some(pf_slot) = self.slots.get(31) {
                 pf_slot.prefetch_load();
             }
@@ -74,8 +78,12 @@ impl<T: Trace> ProcessSlots<T> {
                         "Object {enqueued_object} does not support slot enqueuing."
                     );
                     let mut closure = |slot: SlotOfTrace<T>| {
-                        self.slots.push_back(slot);
-                        self.pushes += 1;
+                        if top_slot.is_none() {
+                            top_slot = Some(slot);
+                        } else {
+                            self.slots.push_back(slot);
+                            self.pushes += 1;
+                        }
                     };
                     <T::VM as VMBinding>::VMScanning::scan_object(
                         tls,
