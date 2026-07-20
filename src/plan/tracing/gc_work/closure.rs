@@ -56,7 +56,7 @@ impl<T: Trace> ProcessSlots<T> {
         let tls = worker.tls;
 
         for (i, slot) in self.slots.iter().enumerate() {
-            if let Some(pf_slot) = self.slots.get(i+8) {
+            if let Some(pf_slot) = self.slots.get(i+32) {
                 pf_slot.prefetch_load();
             }
             if let Some(object) = slot.load() {
