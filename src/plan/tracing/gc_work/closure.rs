@@ -27,9 +27,11 @@ pub struct ProcessSlots<T: Trace> {
 impl<T: Trace> ProcessSlots<T> {
     #[cfg(not(feature = "edge_enqueueing"))]
     const SCAN_OBJECTS_IMMEDIATELY: bool = true;
+    #[cfg(feature = "edge_enqueueing")]
+    const PFD: usize = 32;
 
     pub fn new(mut slots: Vec<SlotOfTrace<T>>, bucket: WorkBucketStage) -> Self {
-        let prefetch_queue: VecDeque<SlotOfTrace<T>> = slots.split_off(std::cmp::max(slots.len(), 8) - 8).into();
+        let prefetch_queue: VecDeque<SlotOfTrace<T>> = slots.split_off(std::cmp::max(slots.len(), Self::PFD) - Self::PFD).into();
         Self {
             scan_stack: slots,
             prefetch_queue,
@@ -59,7 +61,7 @@ impl<T: Trace> ProcessSlots<T> {
     }
 
     fn fill_prefetch_queue(&mut self) {
-        while self.prefetch_queue.len() < 8 && !self.scan_stack.is_empty() {
+        while self.prefetch_queue.len() < Self::PFD && !self.scan_stack.is_empty() {
             if let Some(slot) = self.scan_stack.pop() {
                 slot.prefetch_load();
                 self.prefetch_queue.push_back(slot);
@@ -86,7 +88,11 @@ impl<T: Trace> ProcessSlots<T> {
                         "Object {enqueued_object} does not support slot enqueuing."
                     );
                     let mut closure = |slot: SlotOfTrace<T>| {
-                        self.scan_stack.push(slot);
+                        if self.prefetch_queue.len() < Self::PFD {
+                            self.prefetch_queue.push_back(slot);
+                        } else {
+                            self.scan_stack.push(slot);
+                        }
                         self.pushes += 1;
                     };
                     <T::VM as VMBinding>::VMScanning::scan_object(
