@@ -320,10 +320,10 @@ fn perf_ctrl_send_command(command: &'static str) -> bool {
     true
 }
 
-fn perf_ctrl_enable() {
+pub fn perf_ctrl_enable() {
     perf_ctrl_send_command("enable\n");
 }
 
-fn perf_ctrl_disable() {
+pub fn perf_ctrl_disable() {
     perf_ctrl_send_command("disable\n");
 }

@@ -5,6 +5,7 @@ use crate::plan::global::CreateGeneralPlanArgs;
 use crate::plan::global::CreateSpecificPlanArgs;
 use crate::plan::global::{BasePlan, CommonPlan};
 use crate::plan::plan_constraints::MAX_NON_LOS_ALLOC_BYTES_COPYING_PLAN;
+use crate::plan::tracing::gc_work::closure::{AfterClosure, BeforeClosure};
 use crate::plan::tracing::gc_work::weakref::{
     VMForwardWeakRefs, VMPostForwarding, VMProcessWeakRefs,
 };
@@ -158,6 +159,14 @@ impl<VM: VMBinding> Plan for Compressor<VM> {
 
         // VM-specific work after forwarding, possible to implement ref enququing.
         scheduler.work_buckets[WorkBucketStage::Release].add(VMPostForwarding::<VM>::default());
+
+        #[cfg(feature = "perf_closure")]
+        {
+            scheduler.work_buckets[WorkBucketStage::Prepare]
+                .set_sentinel(Box::new(BeforeClosure::new()));
+            scheduler.work_buckets[WorkBucketStage::VMRefClosure]
+                .set_sentinel(Box::new(AfterClosure::new()));
+        }
 
         // Analysis GC work
         #[cfg(feature = "analysis")]

@@ -1,5 +1,7 @@
 use std::marker::PhantomData;
 
+#[cfg(feature = "perf_closure")]
+use crate::util::statistics::stats::{perf_ctrl_disable, perf_ctrl_enable};
 use crate::{
     plan::{
         tracing::{gc_work::DefaultObjectTracerContext, SlotOfTrace, Trace},
@@ -10,6 +12,40 @@ use crate::{
     vm::{slot::Slot, ObjectTracerContext, Scanning, VMBinding},
     MMTK,
 };
+
+#[cfg(feature = "perf_closure")]
+pub struct AfterClosure {}
+
+#[cfg(feature = "perf_closure")]
+impl<VM: VMBinding> GCWork<VM> for AfterClosure {
+    fn do_work(&mut self, _worker: &mut GCWorker<VM>, _mmtk: &'static MMTK<VM>) {
+        perf_ctrl_disable();
+    }
+}
+
+#[cfg(feature = "perf_closure")]
+impl AfterClosure {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+#[cfg(feature = "perf_closure")]
+pub struct BeforeClosure {}
+
+#[cfg(feature = "perf_closure")]
+impl<VM: VMBinding> GCWork<VM> for BeforeClosure {
+    fn do_work(&mut self, _worker: &mut GCWorker<VM>, _mmtk: &'static MMTK<VM>) {
+        perf_ctrl_enable();
+    }
+}
+
+#[cfg(feature = "perf_closure")]
+impl BeforeClosure {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
 
 /// A work packet for processing slots during a stop-the-world tracing GC and the final mark pause
 /// of a concurrent GC.
