@@ -266,6 +266,18 @@ impl Stats {
     pub fn get_gathering_stats(&self) -> bool {
         self.shared.get_gathering_stats()
     }
+
+    pub fn perf_ctrl_enable(&self) {
+        if self.get_gathering_stats() {
+            perf_ctrl_send_command("enable\n");
+        }
+    }
+
+    pub fn perf_ctrl_disable(&self) {
+        if self.get_gathering_stats() {
+            perf_ctrl_send_command("disable\n");
+        }
+    }
 }
 
 fn read_perf_fd_env(env_name: &'static str) -> i32 {
@@ -318,12 +330,4 @@ fn perf_ctrl_send_command(command: &'static str) -> bool {
         }
     }
     true
-}
-
-pub fn perf_ctrl_enable() {
-    perf_ctrl_send_command("enable\n");
-}
-
-pub fn perf_ctrl_disable() {
-    perf_ctrl_send_command("disable\n");
 }

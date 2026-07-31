@@ -8,6 +8,7 @@ use super::worker_goals::{WorkerGoal, WorkerGoals};
 use super::worker_monitor::{LastParkedResult, WorkerMonitor};
 use super::*;
 use crate::mmtk::MMTK;
+use crate::plan::tracing::gc_work::closure::{AfterClosure, BeforeClosure};
 use crate::plan::tracing::gc_work::weakref::{
     VMForwardWeakRefs, VMPostForwarding, VMProcessWeakRefs,
 };
@@ -237,6 +238,14 @@ impl<VM: VMBinding> GCWorkScheduler<VM> {
         }
 
         self.work_buckets[WorkBucketStage::Release].add(VMPostForwarding::<VM>::default());
+
+        #[cfg(feature = "perf_closure")]
+        {
+            self.work_buckets[WorkBucketStage::Prepare]
+                .set_sentinel(Box::new(BeforeClosure::new()));
+            self.work_buckets[WorkBucketStage::VMRefClosure]
+                .set_sentinel(Box::new(AfterClosure::new()));
+        }
     }
 
     fn are_buckets_drained(&self, buckets: &[WorkBucketStage]) -> bool {

@@ -1,7 +1,6 @@
 use std::marker::PhantomData;
 
 #[cfg(feature = "perf_closure")]
-use crate::util::statistics::stats::{perf_ctrl_disable, perf_ctrl_enable};
 use crate::{
     plan::{
         tracing::{gc_work::DefaultObjectTracerContext, SlotOfTrace, Trace},
@@ -18,8 +17,8 @@ pub struct AfterClosure {}
 
 #[cfg(feature = "perf_closure")]
 impl<VM: VMBinding> GCWork<VM> for AfterClosure {
-    fn do_work(&mut self, _worker: &mut GCWorker<VM>, _mmtk: &'static MMTK<VM>) {
-        perf_ctrl_disable();
+    fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
+        mmtk.stats.perf_ctrl_disable();
     }
 }
 
@@ -35,8 +34,8 @@ pub struct BeforeClosure {}
 
 #[cfg(feature = "perf_closure")]
 impl<VM: VMBinding> GCWork<VM> for BeforeClosure {
-    fn do_work(&mut self, _worker: &mut GCWorker<VM>, _mmtk: &'static MMTK<VM>) {
-        perf_ctrl_enable();
+    fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
+        mmtk.stats.perf_ctrl_enable();
     }
 }
 
