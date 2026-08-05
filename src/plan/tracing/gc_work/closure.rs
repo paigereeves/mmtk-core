@@ -35,6 +35,11 @@ pub struct BeforeClosure {}
 #[cfg(feature = "perf_closure")]
 impl<VM: VMBinding> GCWork<VM> for BeforeClosure {
     fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
+        let llc_size: usize = 30 * 1024 * 1024; // ADL, 30Mb
+        let mut v = vec![0u8; llc_size];
+        for item in v.iter_mut() {
+            *item += 1;
+        }
         mmtk.stats.perf_ctrl_enable();
     }
 }
