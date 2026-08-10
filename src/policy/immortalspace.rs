@@ -1,5 +1,6 @@
 use atomic::Ordering;
 
+use crate::policy::gc_work::TRACE_KIND_AUX;
 use crate::policy::sft::SFT;
 use crate::policy::space::{CommonSpace, Space};
 use crate::util::address::Address;
@@ -146,7 +147,11 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for ImmortalSp
         _copy: Option<CopySemantics>,
         _worker: &mut GCWorker<VM>,
     ) -> ObjectReference {
-        self.trace_object(queue, object)
+        if KIND == TRACE_KIND_AUX {
+            self.common.trace_aux(queue, object)
+        } else {
+            self.trace_object(queue, object)
+        }
     }
     fn may_move_objects<const KIND: crate::policy::gc_work::TraceKind>() -> bool {
         false
@@ -160,7 +165,10 @@ impl<VM: VMBinding> ImmortalSpace<VM> {
         let common = CommonSpace::new(args.into_policy_args(
             false,
             true,
-            metadata::extract_side_metadata(&[*VM::VMObjectModel::LOCAL_MARK_BIT_SPEC]),
+            metadata::extract_side_metadata(&[
+                *VM::VMObjectModel::LOCAL_MARK_BIT_SPEC,
+                *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC,
+            ]),
         ));
         ImmortalSpace {
             mark_state: MarkState::new(),

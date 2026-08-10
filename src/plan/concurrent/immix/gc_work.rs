@@ -1,6 +1,6 @@
 use crate::plan::concurrent::concurrent_marking_work::ConcurrentMarkingRootsWorkFactory;
 use crate::plan::concurrent::immix::global::ConcurrentImmix;
-use crate::plan::tracing::PlanTrace;
+use crate::plan::tracing::{PlanTrace, UnsupportedTrace};
 use crate::policy::gc_work::{TraceKind, TRACE_KIND_TRANSITIVE_PIN};
 use crate::policy::immix::TRACE_KIND_FAST;
 use crate::vm::VMBinding;
@@ -17,6 +17,7 @@ impl<VM: VMBinding, const KIND: TraceKind> crate::scheduler::GCWorkContext
     type PlanType = ConcurrentImmix<VM>;
     type DefaultTrace = PlanTrace<ConcurrentImmix<VM>, KIND>;
     type PinningTrace = PlanTrace<ConcurrentImmix<VM>, TRACE_KIND_TRANSITIVE_PIN>;
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 }
 
 /// The `GCWorkContext` implementation for concurrent marking.  Note that it overrides the
@@ -28,6 +29,7 @@ impl<VM: VMBinding> crate::scheduler::GCWorkContext for ConcurrentImmixGCWorkCon
     type PlanType = ConcurrentImmix<VM>;
     type DefaultTrace = PlanTrace<Self::PlanType, TRACE_KIND_FAST>;
     type PinningTrace = PlanTrace<Self::PlanType, TRACE_KIND_FAST>;
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 
     fn make_roots_work_factory(
         mmtk: &'static crate::MMTK<Self::VM>,

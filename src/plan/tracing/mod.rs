@@ -210,7 +210,7 @@ impl<P: Plan + PlanTraceObject<P::VM>, const KIND: TraceKind> Trace for PlanTrac
     }
 
     fn post_scan_object(&self, object: ObjectReference) {
-        self.plan.post_scan_object(object);
+        self.plan.post_scan_object::<KIND>(object);
     }
 
     fn may_move_objects() -> bool {

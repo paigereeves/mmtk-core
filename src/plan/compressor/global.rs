@@ -164,7 +164,7 @@ impl<VM: VMBinding> Plan for Compressor<VM> {
         {
             scheduler.work_buckets[WorkBucketStage::Prepare]
                 .set_sentinel(Box::new(BeforeClosure::new()));
-            scheduler.work_buckets[WorkBucketStage::VMRefClosure]
+            scheduler.work_buckets[WorkBucketStage::AuxiliaryClosure]
                 .set_sentinel(Box::new(AfterClosure::new()));
         }
 

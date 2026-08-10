@@ -23,13 +23,18 @@ use crate::{
 /// [`WorkBucketStage::Closure`] buckets depending on the kinds of roots.
 ///
 /// `DT` and `PT` are the [`Trace`] types for the default trace and pinning trace, respectively.
-pub(crate) struct DefaultRootsWorkFactory<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>> {
+pub(crate) struct DefaultRootsWorkFactory<
+    VM: VMBinding,
+    DT: Trace<VM = VM>,
+    PT: Trace<VM = VM>,
+    AT: Trace<VM = VM>,
+> {
     pub(crate) mmtk: &'static MMTK<VM>,
-    phantom: PhantomData<(DT, PT)>,
+    phantom: PhantomData<(DT, PT, AT)>,
 }
 
-impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>> Clone
-    for DefaultRootsWorkFactory<VM, DT, PT>
+impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>, AT: Trace<VM = VM>> Clone
+    for DefaultRootsWorkFactory<VM, DT, PT, AT>
 {
     fn clone(&self) -> Self {
         Self {
@@ -39,8 +44,8 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>> Clone
     }
 }
 
-impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>> RootsWorkFactory<VM::VMSlot>
-    for DefaultRootsWorkFactory<VM, DT, PT>
+impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>, AT: Trace<VM = VM>>
+    RootsWorkFactory<VM::VMSlot> for DefaultRootsWorkFactory<VM, DT, PT, AT>
 {
     fn create_process_roots_work(&mut self, slots: Vec<VM::VMSlot>) {
         // Note: We should use the same USDT name "mmtk:roots" for all the three kinds of roots. A
@@ -63,8 +68,15 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>> RootsWorkFactory<VM:
         crate::memory_manager::add_work_packet(
             self.mmtk,
             WorkBucketStage::Closure,
-            ProcessSlots::<DT>::new(slots, WorkBucketStage::Closure),
+            ProcessSlots::<DT>::new(slots.clone(), WorkBucketStage::Closure),
         );
+        if !self.mmtk.scheduler.work_buckets[WorkBucketStage::Closure].is_open() {
+            crate::memory_manager::add_work_packet(
+                self.mmtk,
+                WorkBucketStage::AuxiliaryClosure,
+                ProcessSlots::<AT>::new(slots, WorkBucketStage::AuxiliaryClosure),
+            );
+        }
     }
 
     fn create_process_pinning_roots_work(&mut self, nodes: Vec<ObjectReference>) {
@@ -82,8 +94,15 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>> RootsWorkFactory<VM:
         crate::memory_manager::add_work_packet(
             self.mmtk,
             WorkBucketStage::PinningRootsTrace,
-            ProcessPinningRoots::<VM, PT, DT>::new(nodes, WorkBucketStage::Closure),
+            ProcessPinningRoots::<VM, PT, DT>::new(nodes.clone(), WorkBucketStage::Closure),
         );
+        if !self.mmtk.scheduler.work_buckets[WorkBucketStage::Closure].is_open() {
+            crate::memory_manager::add_work_packet(
+                self.mmtk,
+                WorkBucketStage::AuxiliaryPinningRootsTrace,
+                ProcessPinningRoots::<VM, PT, DT>::new(nodes, WorkBucketStage::AuxiliaryClosure),
+            );
+        }
     }
 
     fn create_process_tpinning_roots_work(&mut self, nodes: Vec<ObjectReference>) {
@@ -99,12 +118,24 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>> RootsWorkFactory<VM:
         crate::memory_manager::add_work_packet(
             self.mmtk,
             WorkBucketStage::TPinningClosure,
-            ProcessPinningRoots::<VM, PT, PT>::new(nodes, WorkBucketStage::TPinningClosure),
+            ProcessPinningRoots::<VM, PT, PT>::new(nodes.clone(), WorkBucketStage::TPinningClosure),
         );
+        if !self.mmtk.scheduler.work_buckets[WorkBucketStage::TPinningClosure].is_open() {
+            crate::memory_manager::add_work_packet(
+                self.mmtk,
+                WorkBucketStage::AuxiliaryTPinningClosure,
+                ProcessPinningRoots::<VM, PT, AT>::new(
+                    nodes,
+                    WorkBucketStage::AuxiliaryTPinningClosure,
+                ),
+            );
+        }
     }
 }
 
-impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>> DefaultRootsWorkFactory<VM, DT, PT> {
+impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>, AT: Trace<VM = VM>>
+    DefaultRootsWorkFactory<VM, DT, PT, AT>
+{
     pub(crate) fn new(mmtk: &'static MMTK<VM>) -> Self {
         Self {
             mmtk,

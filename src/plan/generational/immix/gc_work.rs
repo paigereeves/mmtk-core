@@ -12,6 +12,7 @@ impl<VM: VMBinding> crate::scheduler::GCWorkContext for GenImmixNurseryGCWorkCon
     type PlanType = GenImmix<VM>;
     type DefaultTrace = GenNurseryTrace<VM, Self::PlanType, DEFAULT_TRACE>;
     type PinningTrace = UnsupportedTrace<VM>;
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 }
 
 pub(super) struct GenImmixMatureGCWorkContext<VM: VMBinding, const KIND: TraceKind>(
@@ -24,4 +25,5 @@ impl<VM: VMBinding, const KIND: TraceKind> crate::scheduler::GCWorkContext
     type PlanType = GenImmix<VM>;
     type DefaultTrace = PlanTrace<GenImmix<VM>, KIND>;
     type PinningTrace = UnsupportedTrace<VM>;
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 }

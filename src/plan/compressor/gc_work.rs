@@ -1,6 +1,7 @@
 use super::global::Compressor;
 use crate::plan::tracing::{PlanTrace, UnsupportedTrace};
 use crate::policy::compressor::{CompressorSpace, TRACE_KIND_FORWARD_ROOT, TRACE_KIND_MARK};
+use crate::policy::gc_work::TRACE_KIND_AUX;
 use crate::policy::largeobjectspace::LargeObjectSpace;
 use crate::scheduler::gc_work::*;
 use crate::scheduler::{GCWork, GCWorker, WorkBucketStage};
@@ -92,6 +93,8 @@ impl<VM: VMBinding> AfterCompact<VM> {
 pub type MarkingTrace<VM> = PlanTrace<Compressor<VM>, TRACE_KIND_MARK>;
 /// Forwarding trace
 pub type ForwardingTrace<VM> = PlanTrace<Compressor<VM>, TRACE_KIND_FORWARD_ROOT>;
+/// Auxiliary trace
+pub type AuxiliaryTrace<VM> = PlanTrace<Compressor<VM>, TRACE_KIND_AUX>;
 
 pub struct CompressorWorkContext<VM: VMBinding>(std::marker::PhantomData<VM>);
 impl<VM: VMBinding> crate::scheduler::GCWorkContext for CompressorWorkContext<VM> {
@@ -99,6 +102,7 @@ impl<VM: VMBinding> crate::scheduler::GCWorkContext for CompressorWorkContext<VM
     type PlanType = Compressor<VM>;
     type DefaultTrace = MarkingTrace<VM>;
     type PinningTrace = UnsupportedTrace<VM>;
+    type AuxiliaryTrace = AuxiliaryTrace<VM>;
 }
 
 pub struct CompressorForwardingWorkContext<VM: VMBinding>(std::marker::PhantomData<VM>);
@@ -107,4 +111,5 @@ impl<VM: VMBinding> crate::scheduler::GCWorkContext for CompressorForwardingWork
     type PlanType = Compressor<VM>;
     type DefaultTrace = ForwardingTrace<VM>;
     type PinningTrace = UnsupportedTrace<VM>;
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 }

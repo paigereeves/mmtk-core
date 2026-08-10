@@ -1,6 +1,6 @@
 use crate::plan::tracing::OptionObjectQueue;
 use crate::policy::compressor::forwarding;
-use crate::policy::gc_work::{TraceKind, TRACE_KIND_TRANSITIVE_PIN};
+use crate::policy::gc_work::{TraceKind, TRACE_KIND_AUX, TRACE_KIND_TRANSITIVE_PIN};
 use crate::policy::largeobjectspace::LargeObjectSpace;
 use crate::policy::sft::{GCWorkerMutRef, SFT};
 use crate::policy::space::{CommonSpace, Space};
@@ -189,12 +189,14 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for Compressor
             self.trace_mark_object(queue, object)
         } else if KIND == TRACE_KIND_FORWARD_ROOT {
             self.trace_forward_root(queue, object)
+        } else if KIND == TRACE_KIND_AUX {
+            self.common.trace_aux(queue, object)
         } else {
             unreachable!()
         }
     }
     fn may_move_objects<const KIND: crate::policy::gc_work::TraceKind>() -> bool {
-        if KIND == TRACE_KIND_MARK {
+        if KIND == TRACE_KIND_MARK || KIND == TRACE_KIND_AUX {
             false
         } else if KIND == TRACE_KIND_FORWARD_ROOT {
             true
@@ -214,6 +216,7 @@ impl<VM: VMBinding> CompressorSpace<VM> {
         let local_specs = extract_side_metadata(&[
             MetadataSpec::OnSide(forwarding::MARK_SPEC),
             MetadataSpec::OnSide(forwarding::OFFSET_VECTOR_SPEC),
+            *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC,
         ]);
         let is_discontiguous = args.vmrequest.is_discontiguous();
         let scheduler = args.scheduler.clone();
@@ -235,6 +238,9 @@ impl<VM: VMBinding> CompressorSpace<VM> {
             .enumerate_regions(&mut |r: &AllocatedRegion<forwarding::CompressorRegion>| {
                 forwarding::MARK_SPEC
                     .bzero_metadata(r.region.start(), r.region.end() - r.region.start());
+                if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC {
+                    side.bzero_metadata(r.region.start(), r.region.end() - r.region.start());
+                }
             });
     }
 

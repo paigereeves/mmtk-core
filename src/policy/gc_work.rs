@@ -4,6 +4,7 @@ pub(crate) type TraceKind = u8;
 
 pub const DEFAULT_TRACE: u8 = u8::MAX;
 pub const TRACE_KIND_TRANSITIVE_PIN: u8 = DEFAULT_TRACE - 1;
+pub const TRACE_KIND_AUX: u8 = 123;
 
 use crate::plan::ObjectQueue;
 use crate::scheduler::GCWorker;
@@ -31,7 +32,7 @@ pub trait PolicyTraceObject<VM: VMBinding> {
 
     /// Policy-specific post-scan-object hook.  It is called after scanning
     /// each object in this space.
-    fn post_scan_object(&self, _object: ObjectReference) {
+    fn post_scan_object<const KIND: TraceKind>(&self, _object: ObjectReference) {
         // Do nothing.
     }
 

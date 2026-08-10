@@ -103,6 +103,7 @@ impl<VM: VMBinding> crate::scheduler::GCWorkContext for MarkCompactGCWorkContext
     type PlanType = MarkCompact<VM>;
     type DefaultTrace = MarkingTrace<VM>;
     type PinningTrace = UnsupportedTrace<VM>;
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 }
 
 pub struct MarkCompactForwardingGCWorkContext<VM: VMBinding>(std::marker::PhantomData<VM>);
@@ -111,4 +112,5 @@ impl<VM: VMBinding> crate::scheduler::GCWorkContext for MarkCompactForwardingGCW
     type PlanType = MarkCompact<VM>;
     type DefaultTrace = ForwardingTrace<VM>;
     type PinningTrace = UnsupportedTrace<VM>;
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 }

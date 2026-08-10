@@ -11,6 +11,7 @@ impl<VM: VMBinding> crate::scheduler::GCWorkContext for GenCopyNurseryGCWorkCont
     type PlanType = GenCopy<VM>;
     type DefaultTrace = GenNurseryTrace<Self::VM, Self::PlanType, DEFAULT_TRACE>;
     type PinningTrace = UnsupportedTrace<VM>;
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 }
 
 pub struct GenCopyGCWorkContext<VM: VMBinding>(std::marker::PhantomData<VM>);
@@ -19,4 +20,5 @@ impl<VM: VMBinding> crate::scheduler::GCWorkContext for GenCopyGCWorkContext<VM>
     type PlanType = GenCopy<VM>;
     type DefaultTrace = PlanTrace<GenCopy<VM>, DEFAULT_TRACE>;
     type PinningTrace = UnsupportedTrace<VM>;
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 }

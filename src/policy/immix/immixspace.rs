@@ -2,7 +2,7 @@ use super::defrag::StatsForDefrag;
 use super::line::*;
 use super::{block::*, defrag::Defrag};
 use crate::plan::tracing::OptionObjectQueue;
-use crate::policy::gc_work::{TraceKind, DEFAULT_TRACE, TRACE_KIND_TRANSITIVE_PIN};
+use crate::policy::gc_work::{TraceKind, DEFAULT_TRACE, TRACE_KIND_AUX, TRACE_KIND_TRANSITIVE_PIN};
 use crate::policy::sft::GCWorkerMutRef;
 use crate::policy::sft::SFT;
 use crate::policy::sft_map::SFTMap;
@@ -260,15 +260,21 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for ImmixSpace
             }
         } else if KIND == TRACE_KIND_FAST {
             self.trace_object_without_moving(queue, object)
+        } else if KIND == TRACE_KIND_AUX {
+            self.common.trace_aux(queue, object)
         } else {
             unreachable!()
         }
     }
 
-    fn post_scan_object(&self, object: ObjectReference) {
-        if super::MARK_LINE_AT_SCAN_TIME && !super::BLOCK_ONLY {
-            debug_assert!(self.in_space(object));
-            self.mark_lines(object);
+    fn post_scan_object<const KIND: TraceKind>(&self, object: ObjectReference) {
+        if KIND == TRACE_KIND_AUX {
+            /* do nothing */
+        } else {
+            if super::MARK_LINE_AT_SCAN_TIME && !super::BLOCK_ONLY {
+                debug_assert!(self.in_space(object));
+                self.mark_lines(object);
+            }
         }
     }
 
@@ -276,7 +282,10 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for ImmixSpace
     fn may_move_objects<const KIND: TraceKind>() -> bool {
         if KIND == TRACE_KIND_DEFRAG {
             true
-        } else if KIND == TRACE_KIND_FAST || KIND == TRACE_KIND_TRANSITIVE_PIN {
+        } else if KIND == TRACE_KIND_FAST
+            || KIND == TRACE_KIND_TRANSITIVE_PIN
+            || KIND == TRACE_KIND_AUX
+        {
             false
         } else if KIND == DEFAULT_TRACE {
             // FIXME: This is hacky. When we do a default trace, this should be a nonmoving space.
@@ -303,6 +312,7 @@ impl<VM: VMBinding> ImmixSpace<VM> {
                 MetadataSpec::OnSide(Block::DEFRAG_STATE_TABLE),
                 MetadataSpec::OnSide(Block::MARK_TABLE),
                 *VM::VMObjectModel::LOCAL_MARK_BIT_SPEC,
+                *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC,
                 *VM::VMObjectModel::LOCAL_FORWARDING_BITS_SPEC,
                 *VM::VMObjectModel::LOCAL_FORWARDING_POINTER_SPEC,
                 #[cfg(feature = "object_pinning")]
@@ -314,6 +324,7 @@ impl<VM: VMBinding> ImmixSpace<VM> {
                 MetadataSpec::OnSide(Block::DEFRAG_STATE_TABLE),
                 MetadataSpec::OnSide(Block::MARK_TABLE),
                 *VM::VMObjectModel::LOCAL_MARK_BIT_SPEC,
+                *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC,
                 *VM::VMObjectModel::LOCAL_FORWARDING_BITS_SPEC,
                 *VM::VMObjectModel::LOCAL_FORWARDING_POINTER_SPEC,
                 #[cfg(feature = "object_pinning")]
@@ -942,6 +953,9 @@ impl<VM: VMBinding> PrepareBlockState<VM> {
         // NOTE: We reset the mark bits because cyclic mark bit is currently not supported, yet.
         // See `ImmixSpace::prepare`.
         if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_MARK_BIT_SPEC {
+            side.bzero_metadata(self.chunk.start(), Chunk::BYTES);
+        }
+        if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC {
             side.bzero_metadata(self.chunk.start(), Chunk::BYTES);
         }
     }

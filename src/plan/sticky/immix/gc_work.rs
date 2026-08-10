@@ -1,5 +1,6 @@
 use crate::plan::generational::gc_work::GenNurseryTrace;
 use crate::plan::tracing::PlanTrace;
+use crate::plan::tracing::UnsupportedTrace;
 use crate::policy::gc_work::TraceKind;
 use crate::policy::gc_work::DEFAULT_TRACE;
 use crate::policy::gc_work::TRACE_KIND_TRANSITIVE_PIN;
@@ -14,6 +15,7 @@ impl<VM: VMBinding> crate::scheduler::GCWorkContext for StickyImmixNurseryGCWork
     type PlanType = StickyImmix<VM>;
     type DefaultTrace = GenNurseryTrace<VM, Self::PlanType, DEFAULT_TRACE>;
     type PinningTrace = GenNurseryTrace<VM, Self::PlanType, TRACE_KIND_TRANSITIVE_PIN>;
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 }
 
 pub struct StickyImmixMatureGCWorkContext<VM: VMBinding, const KIND: TraceKind>(
@@ -26,4 +28,5 @@ impl<VM: VMBinding, const KIND: TraceKind> crate::scheduler::GCWorkContext
     type PlanType = StickyImmix<VM>;
     type DefaultTrace = PlanTrace<Self::PlanType, KIND>;
     type PinningTrace = PlanTrace<Self::PlanType, TRACE_KIND_TRANSITIVE_PIN>;
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 }

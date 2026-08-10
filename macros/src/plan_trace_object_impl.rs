@@ -113,7 +113,7 @@ pub(crate) fn generate_post_scan_object<'a>(
         quote! {
             if self.#f_ident.in_space(__mmtk_objref) {
                 use crate::policy::gc_work::PolicyTraceObject;
-                <#f_ty as PolicyTraceObject #ty_generics>::post_scan_object(&self.#f_ident, __mmtk_objref);
+                <#f_ty as PolicyTraceObject #ty_generics>::post_scan_object::<KIND>(&self.#f_ident, __mmtk_objref);
                 return;
             }
         }
@@ -124,14 +124,14 @@ pub(crate) fn generate_post_scan_object<'a>(
         let f_ident = f.ident.as_ref().unwrap();
         let f_ty = &f.ty;
         quote! {
-            <#f_ty as PlanTraceObject #ty_generics>::post_scan_object(&self.#f_ident, __mmtk_objref)
+            <#f_ty as PlanTraceObject #ty_generics>::post_scan_object::<KIND>(&self.#f_ident, __mmtk_objref)
         }
     } else {
         TokenStream2::new()
     };
 
     quote! {
-        fn post_scan_object(&self, __mmtk_objref: crate::util::ObjectReference) {
+        fn post_scan_object<const KIND: crate::policy::gc_work::TraceKind>(&self, __mmtk_objref: crate::util::ObjectReference) {
             use crate::plan::PlanTraceObject;
             #(#scan_field_handler)*
             #parent_field_delegator

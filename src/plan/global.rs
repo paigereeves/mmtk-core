@@ -929,7 +929,7 @@ pub trait PlanTraceObject<VM: VMBinding> {
     /// Post-scan objects in the plan.
     ///
     /// See [`crate::plan::tracing::Trace::post_scan_object`].
-    fn post_scan_object(&self, object: ObjectReference);
+    fn post_scan_object<const KIND: TraceKind>(&self, object: ObjectReference);
 
     /// Whether objects in this plan may move.
     ///

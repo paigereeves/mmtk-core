@@ -1,5 +1,6 @@
 use super::MarkSweep;
 use crate::plan::tracing::PlanTrace;
+use crate::plan::tracing::UnsupportedTrace;
 use crate::policy::gc_work::DEFAULT_TRACE;
 use crate::vm::VMBinding;
 
@@ -9,4 +10,5 @@ impl<VM: VMBinding> crate::scheduler::GCWorkContext for MSGCWorkContext<VM> {
     type PlanType = MarkSweep<VM>;
     type DefaultTrace = PlanTrace<MarkSweep<VM>, DEFAULT_TRACE>;
     type PinningTrace = PlanTrace<MarkSweep<VM>, DEFAULT_TRACE>;
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 }

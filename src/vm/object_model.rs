@@ -110,6 +110,8 @@ pub trait ObjectModel<VM: VMBinding> {
     /// OpenJDK binding prefer to have the mark bits in side metadata to allow for bulk operations.
     const LOCAL_MARK_BIT_SPEC: VMLocalMarkBitSpec;
 
+    const LOCAL_AUX_MARK_BIT_SPEC: VMLocalAuxMarkBitSpec;
+
     #[cfg(feature = "object_pinning")]
     /// A local 1-bit metadata specification for the pinning bit, used by plans that need to pin objects. It is
     /// generally in side metadata.
@@ -613,6 +615,14 @@ pub mod specs {
     define_vm_metadata_spec!(
         /// 1-bit local metadata for spaces that need to mark an object.
         VMLocalMarkBitSpec,
+        false,
+        0,
+        LOG_MIN_OBJECT_SIZE
+    );
+    // Mark bit: 1 bit per object, local
+    define_vm_metadata_spec!(
+        /// 1-bit local metadata for spaces that need to mark an object.
+        VMLocalAuxMarkBitSpec,
         false,
         0,
         LOG_MIN_OBJECT_SIZE

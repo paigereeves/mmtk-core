@@ -1,5 +1,5 @@
 use super::global::PageProtect;
-use crate::plan::tracing::PlanTrace;
+use crate::plan::tracing::{PlanTrace, UnsupportedTrace};
 use crate::policy::gc_work::DEFAULT_TRACE;
 use crate::vm::VMBinding;
 
@@ -9,4 +9,5 @@ impl<VM: VMBinding> crate::scheduler::GCWorkContext for PPGCWorkContext<VM> {
     type PlanType = PageProtect<VM>;
     type DefaultTrace = PlanTrace<PageProtect<VM>, DEFAULT_TRACE>;
     type PinningTrace = PlanTrace<PageProtect<VM>, DEFAULT_TRACE>;
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 }

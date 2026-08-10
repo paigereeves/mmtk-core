@@ -100,6 +100,7 @@ pub trait GCWorkContext: Send + 'static {
     ///
     /// [`UnsupportedTrace`]: crate::plan::tracing::UnsupportedTrace
     type PinningTrace: Trace<VM = Self::VM>;
+    type AuxiliaryTrace: Trace<VM = Self::VM>;
 
     /// Create an instance of [`RootsWorkFactory`] for root scanning in the current GC.
     ///
@@ -109,6 +110,11 @@ pub trait GCWorkContext: Send + 'static {
     fn make_roots_work_factory(
         mmtk: &'static MMTK<Self::VM>,
     ) -> impl RootsWorkFactory<<Self::VM as VMBinding>::VMSlot> {
-        DefaultRootsWorkFactory::<Self::VM, Self::DefaultTrace, Self::PinningTrace>::new(mmtk)
+        DefaultRootsWorkFactory::<
+            Self::VM,
+            Self::DefaultTrace,
+            Self::PinningTrace,
+            Self::AuxiliaryTrace,
+        >::new(mmtk)
     }
 }

@@ -1,6 +1,6 @@
 use crate::plan::tracing::{ObjectQueue, OptionObjectQueue};
 use crate::policy::copy_context::PolicyCopyContext;
-use crate::policy::gc_work::TRACE_KIND_TRANSITIVE_PIN;
+use crate::policy::gc_work::{TRACE_KIND_AUX, TRACE_KIND_TRANSITIVE_PIN};
 use crate::policy::sft::GCWorkerMutRef;
 use crate::policy::sft::SFT;
 use crate::policy::space::{CommonSpace, Space};
@@ -171,7 +171,11 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for CopySpace<
             KIND != TRACE_KIND_TRANSITIVE_PIN,
             "Copyspace does not support transitive pin trace."
         );
-        self.trace_object(queue, object, copy, worker)
+        if KIND == TRACE_KIND_AUX {
+            self.common.trace_aux(queue, object)
+        } else {
+            self.trace_object(queue, object, copy, worker)
+        }
     }
 
     fn may_move_objects<const KIND: crate::policy::gc_work::TraceKind>() -> bool {
@@ -189,6 +193,7 @@ impl<VM: VMBinding> CopySpace<VM> {
             extract_side_metadata(&[
                 *VM::VMObjectModel::LOCAL_FORWARDING_BITS_SPEC,
                 *VM::VMObjectModel::LOCAL_FORWARDING_POINTER_SPEC,
+                *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC,
             ]),
         ));
         CopySpace {
@@ -204,6 +209,11 @@ impl<VM: VMBinding> CopySpace<VM> {
 
     pub fn prepare(&self, from_space: bool) {
         self.from_space.store(from_space, Ordering::SeqCst);
+        self.pr.iterate_allocated_regions().for_each(|(start, size)| {
+            if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC {
+                side.bzero_metadata(start, size);
+            }
+        });
     }
 
     pub fn release(&self) {

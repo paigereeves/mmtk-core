@@ -60,7 +60,7 @@ impl<VM: VMBinding, P: GenerationalPlanExt<VM> + PlanTraceObject<VM>, const KIND
     }
 
     fn post_scan_object(&self, object: ObjectReference) {
-        self.plan.post_scan_object(object);
+        self.plan.post_scan_object::<KIND>(object);
     }
 
     fn may_move_objects() -> bool {

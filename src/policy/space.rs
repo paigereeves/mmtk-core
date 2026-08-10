@@ -8,6 +8,7 @@ use crate::util::metadata::side_metadata::{
 use crate::util::object_enum::ObjectEnumerator;
 use crate::util::Address;
 use crate::util::ObjectReference;
+use crate::ObjectQueue;
 
 use crate::util::heap::layout::vm_layout::{vm_layout, LOG_BYTES_IN_CHUNK};
 use crate::util::heap::{PageResource, VMRequest};
@@ -31,10 +32,11 @@ use crate::util::heap::layout::VMMap;
 use crate::util::heap::space_descriptor::SpaceDescriptor;
 use crate::util::heap::HeapMeta;
 use crate::util::os::*;
+use crate::vm::object_model::ObjectModel;
 use crate::vm::VMBinding;
 
 use std::marker::PhantomData;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -745,6 +747,48 @@ impl<VM: VMBinding> CommonSpace<VM> {
         );
 
         rtn
+    }
+
+    pub fn trace_aux(
+        &self,
+        queue: &mut impl ObjectQueue,
+        object: ObjectReference,
+    ) -> ObjectReference {
+        if CommonSpace::<VM>::aux_mark(object) {
+            // Visit node
+            queue.enqueue(object);
+            return object;
+        }
+        object
+    }
+
+    /// Atomically mark an object.
+    fn aux_mark(object: ObjectReference) -> bool {
+        loop {
+            let old_value = VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC.load_atomic::<VM, u8>(
+                object,
+                None,
+                Ordering::SeqCst,
+            );
+            if old_value == 1 {
+                return false;
+            }
+
+            if VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC
+                .compare_exchange_metadata::<VM, u8>(
+                    object,
+                    old_value,
+                    1,
+                    None,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .is_ok()
+            {
+                break;
+            }
+        }
+        true
     }
 
     /// This function return an estimate value of required virtual memory for the heap size.
