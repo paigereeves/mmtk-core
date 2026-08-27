@@ -111,6 +111,10 @@ impl Block {
     pub const MARK_TABLE: SideMetadataSpec =
         crate::util::metadata::side_metadata::spec_defs::IX_BLOCK_MARK;
 
+    /// Block mark table (side)
+    pub const AUX_MARK_TABLE: SideMetadataSpec =
+        crate::util::metadata::side_metadata::spec_defs::IX_AUX_BLOCK_MARK;
+
     /// Get the chunk containing the block.
     pub fn chunk(&self) -> Chunk {
         Chunk::from_unaligned_address(self.0)
@@ -133,6 +137,12 @@ impl Block {
     pub fn set_state(&self, state: BlockState) {
         let state = u8::from(state);
         Self::MARK_TABLE.store_atomic::<u8>(self.start(), state, Ordering::SeqCst);
+    }
+
+    /// Set block mark state.
+    pub fn set_aux_state(&self, state: BlockState) {
+        let state = u8::from(state);
+        Self::AUX_MARK_TABLE.store_atomic::<u8>(self.start(), state, Ordering::SeqCst);
     }
 
     // Defrag byte

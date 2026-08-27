@@ -1,5 +1,6 @@
 use crate::util::constants::BYTES_IN_WORD;
 use crate::util::linear_scan::{Region, RegionIterator};
+use crate::util::metadata::MetadataSpec;
 use crate::util::metadata::side_metadata::spec_defs::{COMPRESSOR_MARK, COMPRESSOR_OFFSET_VECTOR};
 use crate::util::metadata::side_metadata::SideMetadataSpec;
 use crate::util::{Address, ObjectReference};
@@ -146,6 +147,33 @@ impl<VM: VMBinding> ForwardingMetadata<VM> {
         // We only mark the last word as input to computing forwarding
         // information, so relaxed consistency is okay.
         MARK_SPEC.fetch_or_atomic::<u8>(last_word_of_object, 1, Ordering::Relaxed);
+    }
+
+    pub fn aux_mark_last_word_of_object(&self, object: ObjectReference) {
+        if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC {
+            let last_word_of_object = object.to_object_start::<VM>()
+                + VM::VMObjectModel::get_current_size(object)
+                - BYTES_IN_WORD;
+            #[cfg(debug_assertions)]
+            {
+                // We require to be able to iterate upon first and last bits in the
+                // same bitmap. Therefore the first and last bits cannot be the
+                // same, else we would only encounter one of the two bits.
+                // This requirement implies that objects must be at least two words
+                // large.
+                debug_assert!(
+                    side.are_different_metadata_bits(
+                        object.to_object_start::<VM>(),
+                        last_word_of_object
+                    ),
+                    "The first and last mark bits should be different bits."
+                );
+            }
+
+            // We only mark the last word as input to computing forwarding
+            // information, so relaxed consistency is okay.
+            side.fetch_or_atomic::<u8>(last_word_of_object, 1, Ordering::Relaxed);
+        }
     }
 
     pub fn calculate_offset_vector(&self, region: CompressorRegion, cursor: Address) {

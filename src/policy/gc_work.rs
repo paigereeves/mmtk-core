@@ -4,6 +4,8 @@ pub(crate) type TraceKind = u8;
 
 pub const DEFAULT_TRACE: u8 = u8::MAX;
 pub const TRACE_KIND_TRANSITIVE_PIN: u8 = DEFAULT_TRACE - 1;
+
+#[cfg(feature = "aux_trace")]
 pub const TRACE_KIND_AUX: u8 = 123;
 
 use crate::plan::ObjectQueue;

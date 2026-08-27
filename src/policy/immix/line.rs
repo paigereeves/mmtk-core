@@ -37,6 +37,10 @@ impl Line {
     pub const MARK_TABLE: SideMetadataSpec =
         crate::util::metadata::side_metadata::spec_defs::IX_LINE_MARK;
 
+    /// Line mark table (side)
+    pub const AUX_MARK_TABLE: SideMetadataSpec =
+        crate::util::metadata::side_metadata::spec_defs::IX_AUX_LINE_MARK;
+
     /// Get the block containing the line.
     pub fn block(&self) -> Block {
         debug_assert!(!super::BLOCK_ONLY);
@@ -57,10 +61,24 @@ impl Line {
         }
     }
 
+    /// Mark the line. This will update the side line mark table.
+    pub fn aux_mark(&self, state: u8) {
+        debug_assert!(!super::BLOCK_ONLY);
+        unsafe {
+            Self::AUX_MARK_TABLE.store::<u8>(self.start(), state);
+        }
+    }
+
     /// Test line mark state.
     pub fn is_marked(&self, state: u8) -> bool {
         debug_assert!(!super::BLOCK_ONLY);
         unsafe { Self::MARK_TABLE.load::<u8>(self.start()) == state }
+    }
+
+    /// Test line mark state.
+    pub fn is_aux_marked(&self, state: u8) -> bool {
+        debug_assert!(!super::BLOCK_ONLY);
+        unsafe { Self::AUX_MARK_TABLE.load::<u8>(self.start()) == state }
     }
 
     /// Mark all lines the object is spanned to.
@@ -80,6 +98,28 @@ impl Line {
                 marked_lines += 1;
             }
             line.mark(state)
+        }
+        marked_lines
+    }
+
+    /// Mark all lines the object is spanned to.
+    #[cfg(feature = "aux_trace")]
+    pub fn aux_mark_lines_for_object<VM: VMBinding>(object: ObjectReference, state: u8) -> usize {
+        debug_assert!(!super::BLOCK_ONLY);
+        let start = object.to_object_start::<VM>();
+        let end = start + VM::VMObjectModel::get_current_size(object);
+        let start_line = Line::from_unaligned_address(start);
+        let mut end_line = Line::from_unaligned_address(end);
+        if !Line::is_aligned(end) {
+            end_line = end_line.next();
+        }
+        let mut marked_lines = 0;
+        let iter = RegionIterator::<Line>::new(start_line, end_line);
+        for line in iter {
+            if !line.is_aux_marked(state) {
+                marked_lines += 1;
+            }
+            line.aux_mark(state)
         }
         marked_lines
     }

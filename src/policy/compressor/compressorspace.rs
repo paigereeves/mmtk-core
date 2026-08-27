@@ -1,6 +1,8 @@
 use crate::plan::tracing::OptionObjectQueue;
 use crate::policy::compressor::forwarding;
-use crate::policy::gc_work::{TraceKind, TRACE_KIND_AUX, TRACE_KIND_TRANSITIVE_PIN};
+#[cfg(feature = "aux_trace")]
+use crate::policy::gc_work::TRACE_KIND_AUX;
+use crate::policy::gc_work::{TraceKind, TRACE_KIND_TRANSITIVE_PIN};
 use crate::policy::largeobjectspace::LargeObjectSpace;
 use crate::policy::sft::{GCWorkerMutRef, SFT};
 use crate::policy::space::{CommonSpace, Space};
@@ -185,18 +187,31 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for Compressor
             KIND != TRACE_KIND_TRANSITIVE_PIN,
             "Compressor does not support transitive pin trace."
         );
+
+        #[cfg(feature = "aux_trace")]
+        if KIND == TRACE_KIND_AUX {
+            return if cfg!(feature = "ovc_aux_trace") {
+                self.trace_aux(queue, object)
+            } else {
+                self.common.trace_aux(queue, object)
+            };
+        }
+
         if KIND == TRACE_KIND_MARK {
             self.trace_mark_object(queue, object)
         } else if KIND == TRACE_KIND_FORWARD_ROOT {
             self.trace_forward_root(queue, object)
-        } else if KIND == TRACE_KIND_AUX {
-            self.common.trace_aux(queue, object)
         } else {
             unreachable!()
         }
     }
     fn may_move_objects<const KIND: crate::policy::gc_work::TraceKind>() -> bool {
-        if KIND == TRACE_KIND_MARK || KIND == TRACE_KIND_AUX {
+        #[cfg(feature = "aux_trace")]
+        if KIND == TRACE_KIND_AUX {
+            return false;
+        }
+
+        if KIND == TRACE_KIND_MARK {
             false
         } else if KIND == TRACE_KIND_FORWARD_ROOT {
             true
@@ -216,6 +231,7 @@ impl<VM: VMBinding> CompressorSpace<VM> {
         let local_specs = extract_side_metadata(&[
             MetadataSpec::OnSide(forwarding::MARK_SPEC),
             MetadataSpec::OnSide(forwarding::OFFSET_VECTOR_SPEC),
+            #[cfg(feature = "aux_trace")]
             *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC,
         ]);
         let is_discontiguous = args.vmrequest.is_discontiguous();
@@ -238,6 +254,7 @@ impl<VM: VMBinding> CompressorSpace<VM> {
             .enumerate_regions(&mut |r: &AllocatedRegion<forwarding::CompressorRegion>| {
                 forwarding::MARK_SPEC
                     .bzero_metadata(r.region.start(), r.region.end() - r.region.start());
+                #[cfg(feature = "aux_trace")]
                 if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC {
                     side.bzero_metadata(r.region.start(), r.region.end() - r.region.start());
                 }
@@ -262,6 +279,41 @@ impl<VM: VMBinding> CompressorSpace<VM> {
         if CompressorSpace::<VM>::test_and_mark(object) {
             queue.enqueue(object);
             self.forwarding.mark_last_word_of_object(object);
+        }
+        object
+    }
+
+    /// Atomically mark an object.
+    #[cfg(feature = "aux_trace")]
+    fn aux_mark(object: ObjectReference) -> bool {
+        if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC {
+            side.fetch_update_atomic::<u8, _>(
+                object.to_raw_address(),
+                Ordering::SeqCst,
+                Ordering::Relaxed,
+                |v| {
+                    if v == 0 {
+                        Some(1)
+                    } else {
+                        None
+                    }
+                },
+            )
+            .is_ok()
+        } else {
+            unreachable!()
+        }
+    }
+
+    #[cfg(feature = "aux_trace")]
+    pub fn trace_aux<Q: ObjectQueue>(
+        &self,
+        queue: &mut Q,
+        object: ObjectReference,
+    ) -> ObjectReference {
+        if CompressorSpace::<VM>::aux_mark(object) {
+            queue.enqueue(object);
+            self.forwarding.aux_mark_last_word_of_object(object);
         }
         object
     }

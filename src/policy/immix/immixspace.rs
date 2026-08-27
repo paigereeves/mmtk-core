@@ -2,7 +2,9 @@ use super::defrag::StatsForDefrag;
 use super::line::*;
 use super::{block::*, defrag::Defrag};
 use crate::plan::tracing::OptionObjectQueue;
-use crate::policy::gc_work::{TraceKind, DEFAULT_TRACE, TRACE_KIND_AUX, TRACE_KIND_TRANSITIVE_PIN};
+#[cfg(feature = "aux_trace")]
+use crate::policy::gc_work::TRACE_KIND_AUX;
+use crate::policy::gc_work::{TraceKind, DEFAULT_TRACE, TRACE_KIND_TRANSITIVE_PIN};
 use crate::policy::sft::GCWorkerMutRef;
 use crate::policy::sft::SFT;
 use crate::policy::sft_map::SFTMap;
@@ -238,6 +240,15 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for ImmixSpace
         copy: Option<CopySemantics>,
         worker: &mut GCWorker<VM>,
     ) -> ObjectReference {
+        #[cfg(feature = "aux_trace")]
+        if KIND == TRACE_KIND_AUX {
+            if cfg!(feature = "ix_aux_trace") {
+                return self.trace_aux(queue, object);
+            } else {
+                return self.common.trace_aux(queue, object);
+            }
+        }
+
         if KIND == TRACE_KIND_TRANSITIVE_PIN {
             self.trace_object_without_moving(queue, object)
         } else if KIND == TRACE_KIND_DEFRAG {
@@ -260,32 +271,41 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for ImmixSpace
             }
         } else if KIND == TRACE_KIND_FAST {
             self.trace_object_without_moving(queue, object)
-        } else if KIND == TRACE_KIND_AUX {
-            self.common.trace_aux(queue, object)
         } else {
             unreachable!()
         }
     }
 
     fn post_scan_object<const KIND: TraceKind>(&self, object: ObjectReference) {
+        #[cfg(feature = "aux_trace")]
         if KIND == TRACE_KIND_AUX {
-            /* do nothing */
-        } else {
-            if super::MARK_LINE_AT_SCAN_TIME && !super::BLOCK_ONLY {
-                debug_assert!(self.in_space(object));
-                self.mark_lines(object);
+            if cfg!(feature = "ix_aux_trace") {
+                if super::MARK_LINE_AT_SCAN_TIME && !super::BLOCK_ONLY {
+                    debug_assert!(self.in_space(object));
+                    self.aux_mark_lines(object);
+                }
+            } else {
+                /* do nothing */
             }
+            return;
+        }
+
+        if super::MARK_LINE_AT_SCAN_TIME && !super::BLOCK_ONLY {
+            debug_assert!(self.in_space(object));
+            self.mark_lines(object);
         }
     }
 
     #[allow(clippy::if_same_then_else)] // DEFAULT_TRACE needs a workaround which is documented below.
     fn may_move_objects<const KIND: TraceKind>() -> bool {
+        #[cfg(feature = "aux_trace")]
+        if KIND == TRACE_KIND_AUX {
+            return false;
+        }
+
         if KIND == TRACE_KIND_DEFRAG {
             true
-        } else if KIND == TRACE_KIND_FAST
-            || KIND == TRACE_KIND_TRANSITIVE_PIN
-            || KIND == TRACE_KIND_AUX
-        {
+        } else if KIND == TRACE_KIND_FAST || KIND == TRACE_KIND_TRANSITIVE_PIN {
             false
         } else if KIND == DEFAULT_TRACE {
             // FIXME: This is hacky. When we do a default trace, this should be a nonmoving space.
@@ -311,7 +331,10 @@ impl<VM: VMBinding> ImmixSpace<VM> {
             vec![
                 MetadataSpec::OnSide(Block::DEFRAG_STATE_TABLE),
                 MetadataSpec::OnSide(Block::MARK_TABLE),
+                #[cfg(feature = "aux_trace")]
+                MetadataSpec::OnSide(Block::AUX_MARK_TABLE),
                 *VM::VMObjectModel::LOCAL_MARK_BIT_SPEC,
+                #[cfg(feature = "aux_trace")]
                 *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC,
                 *VM::VMObjectModel::LOCAL_FORWARDING_BITS_SPEC,
                 *VM::VMObjectModel::LOCAL_FORWARDING_POINTER_SPEC,
@@ -321,9 +344,14 @@ impl<VM: VMBinding> ImmixSpace<VM> {
         } else {
             vec![
                 MetadataSpec::OnSide(Line::MARK_TABLE),
+                #[cfg(feature = "aux_trace")]
+                MetadataSpec::OnSide(Line::AUX_MARK_TABLE),
                 MetadataSpec::OnSide(Block::DEFRAG_STATE_TABLE),
                 MetadataSpec::OnSide(Block::MARK_TABLE),
+                #[cfg(feature = "aux_trace")]
+                MetadataSpec::OnSide(Block::AUX_MARK_TABLE),
                 *VM::VMObjectModel::LOCAL_MARK_BIT_SPEC,
+                #[cfg(feature = "aux_trace")]
                 *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC,
                 *VM::VMObjectModel::LOCAL_FORWARDING_BITS_SPEC,
                 *VM::VMObjectModel::LOCAL_FORWARDING_POINTER_SPEC,
@@ -343,6 +371,9 @@ impl<VM: VMBinding> ImmixSpace<VM> {
                 "Invalid args when the plan does not use log bit"
             );
         }
+
+        #[cfg(feature = "aux_trace")]
+        assert!(!args.unlog_traced_object);
 
         // Make sure we override the space args if we force non moving Immix
         if cfg!(feature = "immix_non_moving") && !space_args.never_move_objects {
@@ -401,6 +432,58 @@ impl<VM: VMBinding> ImmixSpace<VM> {
             scheduler: scheduler.clone(),
             space_args,
         }
+    }
+
+    #[cfg(feature = "aux_trace")]
+    pub fn trace_aux(
+        &self,
+        queue: &mut impl ObjectQueue,
+        object: ObjectReference,
+    ) -> ObjectReference {
+        if ImmixSpace::<VM>::aux_mark(object) {
+            if !super::BLOCK_ONLY {
+                if !super::MARK_LINE_AT_SCAN_TIME {
+                    self.aux_mark_lines(object);
+                }
+            } else {
+                Block::containing(object).set_aux_state(BlockState::Marked);
+            }
+            // Visit node
+            queue.enqueue(object);
+            self.unlog_object_if_needed(object);
+            return object;
+        }
+        object
+    }
+
+    /// Atomically mark an object.
+    #[cfg(feature = "aux_trace")]
+    fn aux_mark(object: ObjectReference) -> bool {
+        loop {
+            let old_value = VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC.load_atomic::<VM, u8>(
+                object,
+                None,
+                Ordering::SeqCst,
+            );
+            if old_value == 1 {
+                return false;
+            }
+
+            if VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC
+                .compare_exchange_metadata::<VM, u8>(
+                    object,
+                    old_value,
+                    1,
+                    None,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .is_ok()
+            {
+                break;
+            }
+        }
+        true
     }
 
     /// Flush the thread-local queues in BlockPageResource
@@ -798,6 +881,14 @@ impl<VM: VMBinding> ImmixSpace<VM> {
         Line::mark_lines_for_object::<VM>(object, self.line_mark_state.load(Ordering::Acquire));
     }
 
+    /// Mark all the lines that the given object spans.
+    #[allow(clippy::assertions_on_constants)]
+    #[cfg(feature = "aux_trace")]
+    pub fn aux_mark_lines(&self, object: ObjectReference) {
+        debug_assert!(!super::BLOCK_ONLY);
+        Line::aux_mark_lines_for_object::<VM>(object, self.line_mark_state.load(Ordering::Acquire));
+    }
+
     /// Atomically mark an object.
     fn attempt_mark(&self, object: ObjectReference, mark_state: u8) -> bool {
         loop {
@@ -955,6 +1046,7 @@ impl<VM: VMBinding> PrepareBlockState<VM> {
         if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_MARK_BIT_SPEC {
             side.bzero_metadata(self.chunk.start(), Chunk::BYTES);
         }
+        #[cfg(feature = "aux_trace")]
         if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC {
             side.bzero_metadata(self.chunk.start(), Chunk::BYTES);
         }

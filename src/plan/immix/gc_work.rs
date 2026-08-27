@@ -1,6 +1,9 @@
 use super::global::Immix;
 use crate::plan::tracing::PlanTrace;
+#[cfg(not(feature = "aux_trace"))]
+use crate::plan::tracing::UnsupportedTrace;
 use crate::policy::gc_work::TraceKind;
+#[cfg(feature = "aux_trace")]
 use crate::policy::gc_work::TRACE_KIND_AUX;
 use crate::policy::gc_work::TRACE_KIND_TRANSITIVE_PIN;
 use crate::vm::VMBinding;
@@ -15,5 +18,8 @@ impl<VM: VMBinding, const KIND: TraceKind> crate::scheduler::GCWorkContext
     type PlanType = Immix<VM>;
     type DefaultTrace = PlanTrace<Immix<VM>, KIND>;
     type PinningTrace = PlanTrace<Immix<VM>, TRACE_KIND_TRANSITIVE_PIN>;
+    #[cfg(feature = "aux_trace")]
     type AuxiliaryTrace = PlanTrace<Immix<VM>, TRACE_KIND_AUX>;
+    #[cfg(not(feature = "aux_trace"))]
+    type AuxiliaryTrace = UnsupportedTrace<VM>;
 }

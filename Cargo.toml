@@ -96,13 +96,17 @@ name = "main"
 harness = false
 
 [features]
-default = ["builtin_env_logger", "log/release_max_level_off", "perf_closure",  "edge_enqueueing"]
+default = ["builtin_env_logger", "log/release_max_level_off", "perf_closure",  "edge_enqueueing", "aux_trace", "ix_aux_trace"]
 
 perf_closure = []
 perf_gc = []
 perf_fullex = []
 
-disrupt_cache = []
+# disrupt_cache = []
+aux_trace = []
+ix_aux_trace = ["aux_trace"]
+ovc_aux_trace = ["aux_trace"]
+load_opt_aux_trace = ["aux_trace"]
 
 # Built-in env_logger.  This feature is enabled by default.
 # The user can disable this default feature to remove `env_logger` from the dependencies.

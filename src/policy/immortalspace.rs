@@ -1,5 +1,6 @@
 use atomic::Ordering;
 
+#[cfg(feature = "aux_trace")]
 use crate::policy::gc_work::TRACE_KIND_AUX;
 use crate::policy::sft::SFT;
 use crate::policy::space::{CommonSpace, Space};
@@ -147,11 +148,11 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for ImmortalSp
         _copy: Option<CopySemantics>,
         _worker: &mut GCWorker<VM>,
     ) -> ObjectReference {
+        #[cfg(feature = "aux_trace")]
         if KIND == TRACE_KIND_AUX {
-            self.common.trace_aux(queue, object)
-        } else {
-            self.trace_object(queue, object)
+            return self.common.trace_aux(queue, object);
         }
+        self.trace_object(queue, object)
     }
     fn may_move_objects<const KIND: crate::policy::gc_work::TraceKind>() -> bool {
         false
@@ -167,6 +168,7 @@ impl<VM: VMBinding> ImmortalSpace<VM> {
             true,
             metadata::extract_side_metadata(&[
                 *VM::VMObjectModel::LOCAL_MARK_BIT_SPEC,
+                #[cfg(feature = "aux_trace")]
                 *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC,
             ]),
         ));

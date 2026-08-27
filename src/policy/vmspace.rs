@@ -211,6 +211,7 @@ impl<VM: VMBinding> VMSpace<VM> {
                 true,
                 crate::util::metadata::extract_side_metadata(&[
                     *VM::VMObjectModel::LOCAL_MARK_BIT_SPEC,
+                    #[cfg(feature = "aux_trace")]
                     *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC,
                 ]),
             )),
