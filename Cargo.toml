@@ -96,11 +96,17 @@ name = "main"
 harness = false
 
 [features]
-default = ["builtin_env_logger", "log/release_max_level_off", "perf_closure",  "edge_enqueueing", "aux_trace", "ix_aux_trace"]
+default = ["builtin_env_logger", "log/release_max_level_off", "edge_enqueueing", "perf_aux_closure", "aux_trace", "always_perf"]
 
 perf_closure = []
+perf_aux_closure = ["aux_trace"]
 perf_gc = []
 perf_fullex = []
+
+always_perf = [] # if enabled, send perf signals regardless of in warmup or not
+load_balance_slot_stacks = []
+
+mark_queue = []
 
 # disrupt_cache = []
 aux_trace = []

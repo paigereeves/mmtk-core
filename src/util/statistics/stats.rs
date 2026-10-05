@@ -268,13 +268,13 @@ impl Stats {
     }
 
     pub fn perf_ctrl_enable(&self) {
-        if self.get_gathering_stats() {
+        if self.get_gathering_stats() || cfg!(feature = "always_perf") {
             perf_ctrl_send_command("enable\n");
         }
     }
 
     pub fn perf_ctrl_disable(&self) {
-        if self.get_gathering_stats() {
+        if self.get_gathering_stats() || cfg!(feature = "always_perf") {
             perf_ctrl_send_command("disable\n");
         }
     }

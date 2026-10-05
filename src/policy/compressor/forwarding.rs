@@ -1,5 +1,6 @@
 use crate::util::constants::BYTES_IN_WORD;
 use crate::util::linear_scan::{Region, RegionIterator};
+#[cfg(feature = "aux_trace")]
 use crate::util::metadata::MetadataSpec;
 use crate::util::metadata::side_metadata::spec_defs::{COMPRESSOR_MARK, COMPRESSOR_OFFSET_VECTOR};
 use crate::util::metadata::side_metadata::SideMetadataSpec;
@@ -149,6 +150,7 @@ impl<VM: VMBinding> ForwardingMetadata<VM> {
         MARK_SPEC.fetch_or_atomic::<u8>(last_word_of_object, 1, Ordering::Relaxed);
     }
 
+    #[cfg(feature = "aux_trace")]
     pub fn aux_mark_last_word_of_object(&self, object: ObjectReference) {
         if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC {
             let last_word_of_object = object.to_object_start::<VM>()

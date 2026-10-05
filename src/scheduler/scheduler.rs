@@ -251,8 +251,19 @@ impl<VM: VMBinding> GCWorkScheduler<VM> {
 
         self.work_buckets[WorkBucketStage::Release].add(VMPostForwarding::<VM>::default());
 
-        #[cfg(feature = "perf_closure")]
-        {
+        if cfg!(feature = "perf_closure") {
+            if cfg!(feature = "aux_trace") {
+                self.work_buckets[WorkBucketStage::AuxiliaryClosure]
+                    .set_sentinel(Box::new(BeforeClosure::new()));
+                self.work_buckets[WorkBucketStage::Closure]
+                    .set_sentinel(Box::new(AfterClosure::new()));
+            } else {
+                self.work_buckets[WorkBucketStage::Prepare]
+                    .set_sentinel(Box::new(BeforeClosure::new()));
+                self.work_buckets[WorkBucketStage::Closure]
+                    .set_sentinel(Box::new(AfterClosure::new()));
+            }
+        } else if cfg!(feature = "perf_aux_closure") {
             self.work_buckets[WorkBucketStage::Prepare]
                 .set_sentinel(Box::new(BeforeClosure::new()));
             self.work_buckets[WorkBucketStage::AuxiliaryClosure]

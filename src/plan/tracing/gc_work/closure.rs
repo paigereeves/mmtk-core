@@ -1,6 +1,8 @@
 use std::marker::PhantomData;
+#[cfg(feature = "mark_queue")]
+use std::collections::VecDeque;
 
-#[cfg(feature = "perf_closure")]
+#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
 use crate::{
     plan::{
         tracing::{gc_work::DefaultObjectTracerContext, SlotOfTrace, Trace},
@@ -12,27 +14,27 @@ use crate::{
     MMTK,
 };
 
-#[cfg(feature = "perf_closure")]
+#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
 pub struct AfterClosure {}
 
-#[cfg(feature = "perf_closure")]
+#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
 impl<VM: VMBinding> GCWork<VM> for AfterClosure {
     fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
         mmtk.stats.perf_ctrl_disable();
     }
 }
 
-#[cfg(feature = "perf_closure")]
+#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
 impl AfterClosure {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-#[cfg(feature = "perf_closure")]
+#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
 pub struct BeforeClosure {}
 
-#[cfg(feature = "perf_closure")]
+#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
 impl<VM: VMBinding> GCWork<VM> for BeforeClosure {
     fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
         // #[cfg(feature = "disrupt_cache")]
@@ -47,7 +49,7 @@ impl<VM: VMBinding> GCWork<VM> for BeforeClosure {
     }
 }
 
-#[cfg(feature = "perf_closure")]
+#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
 impl BeforeClosure {
     pub fn new() -> Self {
         Self {}
@@ -61,7 +63,10 @@ impl BeforeClosure {
 /// moved or forwarded.  It will spawn or immediately run the [`ProcessNodes`] work packet to
 /// scan newly traced objects.
 pub struct ProcessSlots<T: Trace> {
+    #[cfg(not(feature = "mark_queue"))]
     slots: Vec<SlotOfTrace<T>>,
+    #[cfg(feature = "mark_queue")]
+    slots: VecDeque<SlotOfTrace<T>>,
     pushes: u32,
     bucket: WorkBucketStage,
 }
@@ -70,7 +75,13 @@ impl<T: Trace> ProcessSlots<T> {
     #[cfg(not(feature = "edge_enqueueing"))]
     const SCAN_OBJECTS_IMMEDIATELY: bool = true;
 
-    pub fn new(slots: Vec<SlotOfTrace<T>>, bucket: WorkBucketStage) -> Self {
+    pub fn new(
+        #[cfg(not(feature = "mark_queue"))]
+        slots: Vec<SlotOfTrace<T>>,
+        #[cfg(feature = "mark_queue")]
+        slots: VecDeque<SlotOfTrace<T>>,
+        bucket: WorkBucketStage
+    ) -> Self {
         Self {
             slots,
             pushes: 0,
@@ -98,11 +109,28 @@ impl<T: Trace> ProcessSlots<T> {
         queue
     }
 
+    #[cfg(not(feature = "mark_queue"))]
+    fn pop_slot(&mut self) -> Option<SlotOfTrace<T>> {
+        self.slots.pop()
+    }
+    #[cfg(not(feature = "mark_queue"))]
+    fn push_slot(&mut self, slot: SlotOfTrace<T>) {
+        self.slots.push(slot);
+    }
+
+    #[cfg(feature = "mark_queue")]
+    fn pop_slot(&mut self) -> Option<SlotOfTrace<T>> {
+        self.slots.pop_front()
+    }
+    #[cfg(feature = "mark_queue")]
+    fn push_slot(&mut self, slot: SlotOfTrace<T>) {
+        self.slots.push_back(slot);
+    }
+
     #[cfg(feature = "edge_enqueueing")]
     fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T) {
         let tls = worker.tls;
-
-        while let Some(slot) = self.slots.pop() {
+        while let Some(slot) = self.pop_slot() {
             if let Some(object) = slot.load() {
                 let new_object = trace.trace_object(worker, object, &mut |enqueued_object| {
                     debug_assert!(
@@ -113,7 +141,7 @@ impl<T: Trace> ProcessSlots<T> {
                         "Object {enqueued_object} does not support slot enqueuing."
                     );
                     let mut closure = |slot: SlotOfTrace<T>| {
-                        self.slots.push(slot);
+                        self.push_slot(slot);
                         self.pushes += 1;
                     };
                     <T::VM as VMBinding>::VMScanning::scan_object(
@@ -231,7 +259,7 @@ impl<T: Trace> ProcessNodes<T> {
 
         let flush = |slots: &mut VectorQueue<_>, worker: &mut GCWorker<T::VM>| {
             let buffer = slots.take();
-            let work_packet = ProcessSlots::<T>::new(buffer, self.bucket);
+            let work_packet = ProcessSlots::<T>::new(buffer.into(), self.bucket);
             worker.add_work(self.bucket, work_packet);
         };
 

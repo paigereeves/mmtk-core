@@ -110,7 +110,7 @@ pub trait ObjectModel<VM: VMBinding> {
     /// OpenJDK binding prefer to have the mark bits in side metadata to allow for bulk operations.
     const LOCAL_MARK_BIT_SPEC: VMLocalMarkBitSpec;
 
-    #[cfg(feature = "aux_trace")]
+    // #[cfg(feature = "aux_trace")]
     const LOCAL_AUX_MARK_BIT_SPEC: VMLocalAuxMarkBitSpec;
 
     #[cfg(feature = "object_pinning")]

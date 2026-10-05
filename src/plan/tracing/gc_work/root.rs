@@ -68,13 +68,14 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>, AT: Trace<VM = VM>>
         crate::memory_manager::add_work_packet(
             self.mmtk,
             WorkBucketStage::Closure,
-            ProcessSlots::<DT>::new(slots.clone(), WorkBucketStage::Closure),
+            ProcessSlots::<DT>::new(slots.clone().into(), WorkBucketStage::Closure),
         );
+        #[cfg(feature = "aux_trace")]
         if !self.mmtk.scheduler.work_buckets[WorkBucketStage::Closure].is_open() {
             crate::memory_manager::add_work_packet(
                 self.mmtk,
                 WorkBucketStage::AuxiliaryClosure,
-                ProcessSlots::<AT>::new(slots, WorkBucketStage::AuxiliaryClosure),
+                ProcessSlots::<AT>::new(slots.into(), WorkBucketStage::AuxiliaryClosure),
             );
         }
     }

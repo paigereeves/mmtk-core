@@ -160,8 +160,19 @@ impl<VM: VMBinding> Plan for Compressor<VM> {
         // VM-specific work after forwarding, possible to implement ref enququing.
         scheduler.work_buckets[WorkBucketStage::Release].add(VMPostForwarding::<VM>::default());
 
-        #[cfg(feature = "perf_closure")]
-        {
+        if cfg!(feature = "perf_closure") {
+            if cfg!(feature = "aux_trace") {
+                scheduler.work_buckets[WorkBucketStage::AuxiliaryClosure]
+                    .set_sentinel(Box::new(BeforeClosure::new()));
+                scheduler.work_buckets[WorkBucketStage::Closure]
+                    .set_sentinel(Box::new(AfterClosure::new()));
+            } else {
+                scheduler.work_buckets[WorkBucketStage::Prepare]
+                    .set_sentinel(Box::new(BeforeClosure::new()));
+                scheduler.work_buckets[WorkBucketStage::Closure]
+                    .set_sentinel(Box::new(AfterClosure::new()));
+            }
+        } else if cfg!(feature = "perf_aux_closure") {
             scheduler.work_buckets[WorkBucketStage::Prepare]
                 .set_sentinel(Box::new(BeforeClosure::new()));
             scheduler.work_buckets[WorkBucketStage::AuxiliaryClosure]

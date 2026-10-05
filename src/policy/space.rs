@@ -806,7 +806,6 @@ impl<VM: VMBinding> CommonSpace<VM> {
         true
     }
 
-
     /// Atomically mark an object.
     #[cfg(feature = "aux_trace")]
     fn aux_mark_opt(object: ObjectReference) -> bool {
@@ -814,7 +813,7 @@ impl<VM: VMBinding> CommonSpace<VM> {
             let old_value = VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC.load_atomic::<VM, u8>(
                 object,
                 None,
-                Ordering::Relaxed
+                Ordering::Relaxed,
             );
             if old_value == 1 {
                 return false;
