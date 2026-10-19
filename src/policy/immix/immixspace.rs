@@ -3,7 +3,7 @@ use super::line::*;
 use super::{block::*, defrag::Defrag};
 use crate::plan::tracing::OptionObjectQueue;
 #[cfg(feature = "aux_trace")]
-use crate::policy::gc_work::TRACE_KIND_AUX;
+use crate::policy::gc_work::{TRACE_KIND_AUX, TRACE_KIND_AUX_NOOP};
 use crate::policy::gc_work::{TraceKind, DEFAULT_TRACE, TRACE_KIND_TRANSITIVE_PIN};
 use crate::policy::sft::GCWorkerMutRef;
 use crate::policy::sft::SFT;
@@ -249,6 +249,11 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for ImmixSpace
             }
         }
 
+        #[cfg(feature = "aux_trace")]
+        if KIND == TRACE_KIND_AUX_NOOP {
+            return object;
+        }
+
         if KIND == TRACE_KIND_TRANSITIVE_PIN {
             self.trace_object_without_moving(queue, object)
         } else if KIND == TRACE_KIND_DEFRAG {
@@ -300,6 +305,10 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for ImmixSpace
     fn may_move_objects<const KIND: TraceKind>() -> bool {
         #[cfg(feature = "aux_trace")]
         if KIND == TRACE_KIND_AUX {
+            return false;
+        }
+        #[cfg(feature = "aux_trace")]
+        if KIND == TRACE_KIND_AUX_NOOP {
             return false;
         }
 

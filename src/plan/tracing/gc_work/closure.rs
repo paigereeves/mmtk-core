@@ -2,6 +2,7 @@
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 
+use std::sync::Mutex;
 use crate::{
     plan::{
         tracing::{gc_work::DefaultObjectTracerContext, SlotOfTrace, Trace},
@@ -37,6 +38,7 @@ impl<T: Trace> GCWork<T::VM> for AfterVMRefClosure<T> {
 
         #[cfg(feature = "perf_closure")]
         mmtk.stats.perf_ctrl_disable();
+        mmtk.print_dist_hist();
     }
 }
 
@@ -62,6 +64,7 @@ impl<VM: VMBinding> GCWork<VM> for AfterPrepare {
         }
         #[cfg(feature = "aux_trace")]
         mmtk.reference_processors.set_allow_new_candidates(false);
+        mmtk.clear_dist_hist();
     }
 }
 
@@ -79,17 +82,59 @@ impl<VM: VMBinding> GCWork<VM> for AfterAuxClosure {
     fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
         #[cfg(feature = "perf_aux_closure")]
         mmtk.stats.perf_ctrl_disable();
+
         #[cfg(feature = "perf_closure")]
         if !crate::plan::is_nursery_gc(mmtk.get_plan()) {
             mmtk.stats.perf_ctrl_enable();
         }
+
         #[cfg(feature = "aux_trace")]
         mmtk.reference_processors.set_allow_new_candidates(true);
+
+        if !crate::plan::is_nursery_gc(mmtk.get_plan()) {
+            mmtk.print_dist_hist();
+        }
     }
 }
 
 #[cfg(feature = "aux_trace")]
 impl AfterAuxClosure {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+#[cfg(not(any(feature = "perf_closure", feature = "perf_aux_closure")))]
+pub struct AfterClosure {}
+
+#[cfg(not(any(feature = "perf_closure", feature = "perf_aux_closure")))]
+impl<VM: VMBinding> GCWork<VM> for AfterClosure {
+    fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
+        if !crate::plan::is_nursery_gc(mmtk.get_plan()) {
+            mmtk.print_dist_hist();
+        }
+    }
+}
+
+#[cfg(not(any(feature = "perf_closure", feature = "perf_aux_closure")))]
+impl AfterClosure {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+#[cfg(not(any(feature = "perf_closure", feature = "perf_aux_closure")))]
+pub struct BeforeClosure {}
+
+#[cfg(not(any(feature = "perf_closure", feature = "perf_aux_closure")))]
+impl<VM: VMBinding> GCWork<VM> for BeforeClosure {
+    fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
+        mmtk.clear_dist_hist();
+    }
+}
+
+#[cfg(not(any(feature = "perf_closure", feature = "perf_aux_closure")))]
+impl BeforeClosure {
     pub fn new() -> Self {
         Self {}
     }
@@ -164,11 +209,51 @@ impl<T: Trace> ProcessSlots<T> {
         self.slots.push_back(slot);
     }
 
+    fn record_ref_dist(&mut self, slot: <<T as Trace>::VM as VMBinding>::VMSlot, obj: Option<ObjectReference>, dist_hist: &Mutex<[i32; 72]>) {
+        let mut dist_hist = dist_hist.lock().unwrap();
+        if let Some(obj) = obj {
+            // println!("slot_addr: {}", slot.addr());
+            // println!("obj_addr: {}", obj);
+            let obj_addr = obj.to_object_start::<<T as Trace>::VM>().as_usize() as i128;
+            let slot_addr = slot.addr().as_usize() as i128;
+            // println!("{} - {}", obj_addr, slot_addr);
+            let dist = obj_addr - slot_addr;
+            // println!("dist: {}", dist);
+            if dist == 0 {
+                dist_hist[35] += 1;
+                assert!(false);
+            } else if dist > 0 {
+                let log = dist.ilog2();
+                // println!("log dist: {}", log);
+                if (log + 32) > 70 {
+                    // out of bounds
+                    dist_hist[71] += 1;
+                } else {
+                    dist_hist[log as usize + 35] += 1;
+                }
+            } else {
+                // println!("(-dist).ilog2() = {}", (-dist).ilog2());
+                let log = (-dist).ilog2();
+                // println!("log dist: -{}", log);
+                if 35 < log {
+                    // out of bounds
+                    dist_hist[71] += 1;
+                } else {
+                    dist_hist[35 - (log as usize)] += 1;
+                }
+            }
+        } else {
+            dist_hist[35] += 1;
+        }
+    }
+
     #[cfg(feature = "edge_enqueueing")]
-    fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T) {
+    fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T, dist_hist: &Mutex<[i32; 72]>) {
         let tls = worker.tls;
         while let Some(slot) = self.pop_slot() {
-            if let Some(object) = slot.load() {
+            let obj = slot.load();
+            self.record_ref_dist(slot, obj, dist_hist);
+            if let Some(object) = obj {
                 let new_object = trace.trace_object(worker, object, &mut |enqueued_object| {
                     debug_assert!(
                         <T::VM as VMBinding>::VMScanning::support_slot_enqueuing(
@@ -251,7 +336,7 @@ impl<T: Trace> GCWork<T::VM> for ProcessSlots<T> {
         }
 
         #[cfg(feature = "edge_enqueueing")]
-        self.process_slots(worker, trace);
+        self.process_slots(worker, trace, &mmtk.dist_hist);
         #[cfg(not(feature = "edge_enqueueing"))]
         {
             let queue = self.process_slots(worker, trace);

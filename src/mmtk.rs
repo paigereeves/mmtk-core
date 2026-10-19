@@ -126,6 +126,7 @@ pub struct MMTK<VM: VMBinding> {
     pub(crate) slot_logger: SlotLogger<VM::VMSlot>,
     pub(crate) gc_trigger: Arc<GCTrigger<VM>>,
     pub(crate) stats: Arc<Stats>,
+    pub(crate) dist_hist: Mutex<[i32; 72]>,
     #[cfg(feature = "sanity")]
     inside_sanity: AtomicBool,
     /// Analysis counters. The feature analysis allows us to periodically stop the world and collect some statistics.
@@ -243,6 +244,25 @@ impl<VM: VMBinding> MMTK<VM> {
             analysis_manager: Arc::new(AnalysisManager::new(stats.clone())),
             gc_trigger,
             stats,
+            dist_hist: Mutex::new([0; 72]),
+        }
+    }
+
+    pub fn print_dist_hist(&self) {
+        println!("Slot - object distance histogram:");
+        let dist_hist = self.dist_hist.lock().unwrap();
+        for i in 0..71 {
+            let n = dist_hist[i];
+            println!("{i}: {n}");
+        }
+        println!("out of bounds: {}", dist_hist[71]);
+
+    }
+
+    pub fn clear_dist_hist(&self) {
+        let mut dist_hist = self.dist_hist.lock().unwrap();
+        for i in 0..72 {
+            dist_hist[i] = 0;
         }
     }
 

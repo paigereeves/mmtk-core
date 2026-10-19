@@ -96,7 +96,7 @@ name = "main"
 harness = false
 
 [features]
-default = ["builtin_env_logger", "log/release_max_level_off", "edge_enqueueing", "perf_aux_closure", "aux_trace", "always_perf"]
+default = ["builtin_env_logger", "log/release_max_level_off", "edge_enqueueing", "aux_trace"]
 
 perf_closure = []
 perf_aux_closure = ["aux_trace"]
