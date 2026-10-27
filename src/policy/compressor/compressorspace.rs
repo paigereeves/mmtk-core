@@ -317,14 +317,11 @@ impl<VM: VMBinding> CompressorSpace<VM> {
             unreachable!()
         }
     }
-        /// Atomically mark an object.
+    /// Atomically mark an object.
     #[cfg(feature = "aux_trace")]
     fn is_aux_marked(object: ObjectReference) -> bool {
         if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC {
-            side.load_atomic::<u8>(
-                object.to_raw_address(),
-                Ordering::SeqCst,
-            ) == 1
+            side.load_atomic::<u8>(object.to_raw_address(), Ordering::SeqCst) == 1
         } else {
             unreachable!()
         }

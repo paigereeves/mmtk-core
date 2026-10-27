@@ -3,9 +3,9 @@ use crate::plan::generational::gc_work::GenNurseryTrace;
 use crate::plan::tracing::PlanTrace;
 use crate::plan::tracing::UnsupportedTrace;
 use crate::policy::gc_work::TraceKind;
+use crate::policy::gc_work::DEFAULT_TRACE;
 #[cfg(feature = "aux_trace")]
 use crate::policy::gc_work::TRACE_KIND_AUX;
-use crate::policy::gc_work::DEFAULT_TRACE;
 use crate::vm::VMBinding;
 
 pub struct GenImmixNurseryGCWorkContext<VM: VMBinding>(std::marker::PhantomData<VM>);

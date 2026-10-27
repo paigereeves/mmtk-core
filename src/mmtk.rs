@@ -30,8 +30,8 @@ use crate::vm::VMBinding;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::default::Default;
-use std::fs;
 use std::fmt::Write as _;
+use std::fs;
 use std::io::Write as _;
 #[cfg(feature = "sanity")]
 use std::sync::atomic::AtomicBool;
@@ -287,18 +287,33 @@ impl<VM: VMBinding> MMTK<VM> {
         let all_slots_histogram = self.all_slots_histogram.lock().unwrap();
         let unmarked_slots_histogram = self.unmarked_slots_histogram.lock().unwrap();
         write!(out, "ALL SLOTS => ").unwrap();
-        for i in 0..(NUM_BUCKETS-2) {
+        for i in 0..(NUM_BUCKETS - 2) {
             let n = all_slots_histogram[i];
             write!(out, "{i}: {n}, ").unwrap();
         }
         write!(out, "\nUNMARKED SLOTS => ").unwrap();
-        for i in 0..(NUM_BUCKETS-2) {
+        for i in 0..(NUM_BUCKETS - 2) {
             let n = unmarked_slots_histogram[i];
             write!(out, "{i}: {n}, ").unwrap();
         }
-        writeln!(out, "\nnull references: {}", all_slots_histogram[NULL_BUCKET]).unwrap();
-        writeln!(out, "out of bounds references (all): {}", all_slots_histogram[OB_BUCKET]).unwrap();
-        writeln!(out, "out of bounds references (unmarked): {}", unmarked_slots_histogram[OB_BUCKET]).unwrap();
+        writeln!(
+            out,
+            "\nnull references: {}",
+            all_slots_histogram[NULL_BUCKET]
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "out of bounds references (all): {}",
+            all_slots_histogram[OB_BUCKET]
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "out of bounds references (unmarked): {}",
+            unmarked_slots_histogram[OB_BUCKET]
+        )
+        .unwrap();
 
         if PRINT_DIST_HIST_TO_FILE {
             fs::OpenOptions::new()

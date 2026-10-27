@@ -11,13 +11,13 @@ use crate::util::alloc::allocators::AllocatorSelector;
 use crate::util::heap::gc_trigger::SpaceStats;
 use crate::util::heap::VMRequest;
 use crate::util::metadata::side_metadata::SideMetadataContext;
+use crate::util::ObjectReference;
 use crate::{plan::global::BasePlan, vm::VMBinding};
 use crate::{
     plan::global::CommonPlan, policy::largeobjectspace::LargeObjectSpace,
     util::opaque_pointer::VMWorkerThread,
 };
 use enum_map::EnumMap;
-use crate::util::ObjectReference;
 
 use mmtk_macros::{HasSpaces, PlanTraceObject};
 

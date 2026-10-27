@@ -2,9 +2,9 @@ use super::MarkSweep;
 use crate::plan::tracing::PlanTrace;
 #[cfg(not(feature = "aux_trace"))]
 use crate::plan::tracing::UnsupportedTrace;
+use crate::policy::gc_work::DEFAULT_TRACE;
 #[cfg(feature = "aux_trace")]
 use crate::policy::gc_work::TRACE_KIND_AUX;
-use crate::policy::gc_work::DEFAULT_TRACE;
 use crate::vm::VMBinding;
 
 pub struct MSGCWorkContext<VM: VMBinding>(std::marker::PhantomData<VM>);

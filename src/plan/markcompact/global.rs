@@ -23,8 +23,8 @@ use crate::util::metadata::side_metadata::SideMetadataContext;
 #[cfg(not(feature = "vo_bit"))]
 use crate::util::metadata::vo_bit::VO_BIT_SIDE_METADATA_SPEC;
 use crate::util::opaque_pointer::*;
-use crate::vm::VMBinding;
 use crate::util::ObjectReference;
+use crate::vm::VMBinding;
 
 use enum_map::EnumMap;
 
