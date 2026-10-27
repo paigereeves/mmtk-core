@@ -111,10 +111,14 @@ pub trait Trace: 'static + Send + Clone {
     /// Note that this method is called very frequently, so it must be efficient.
     fn may_move_objects() -> bool;
 
-    fn obj_is_marked(&self, _obj: ObjectReference) -> bool { unimplemented!() }
+    fn obj_is_marked(&self, _obj: ObjectReference) -> bool {
+        unimplemented!()
+    }
 
     #[cfg(feature = "aux_trace")]
-    fn obj_is_aux_marked(&self, _obj: ObjectReference) -> bool { unimplemented!()}
+    fn obj_is_aux_marked(&self, _obj: ObjectReference) -> bool {
+        unimplemented!()
+    }
 }
 
 /// A shorthand for getting the slot type from a [`Trace`] instance.

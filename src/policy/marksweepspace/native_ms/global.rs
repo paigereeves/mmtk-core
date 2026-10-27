@@ -1,16 +1,21 @@
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
 #[cfg(feature = "aux_trace")]
 use crate::policy::gc_work::TRACE_KIND_AUX;
 use crate::{
     policy::{marksweepspace::native_ms::*, sft::GCWorkerMutRef},
     scheduler::{GCWorkScheduler, GCWorker, WorkBucketStage},
     util::{
-        ObjectReference, copy::CopySemantics, epilogue, heap::{BlockPageResource, PageResource}, metadata::{self, MetadataSpec, side_metadata::SideMetadataSpec}, object_enum::{self, ObjectEnumerator}
+        copy::CopySemantics,
+        epilogue,
+        heap::{BlockPageResource, PageResource},
+        metadata::{self, side_metadata::SideMetadataSpec, MetadataSpec},
+        object_enum::{self, ObjectEnumerator},
+        ObjectReference,
     },
     vm::{ActivePlan, VMBinding},
+};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
 };
 
 #[cfg(feature = "vo_bit")]
@@ -283,11 +288,11 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for MarkSweepS
     fn may_move_objects<const KIND: crate::policy::gc_work::TraceKind>() -> bool {
         false
     }
-    
+
     fn obj_is_marked(&self, obj: ObjectReference) -> bool {
         CommonSpace::<VM>::obj_is_marked(obj)
     }
-    
+
     #[cfg(feature = "aux_trace")]
     fn obj_is_aux_marked(&self, obj: ObjectReference) -> bool {
         CommonSpace::<VM>::obj_is_aux_marked(obj)

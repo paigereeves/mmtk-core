@@ -2,12 +2,18 @@
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 
-use std::sync::Mutex;
 use crate::{
-    MMTK, mmtk::{NULL_BUCKET, NUM_BUCKETS, OB_BUCKET}, plan::{
-        VectorQueue, tracing::{SlotOfTrace, Trace, gc_work::{DefaultObjectTracerContext}}
-    }, scheduler::{EDGES_WORK_BUFFER_SIZE, GCWork, GCWorker, GCWorkerShared, WorkBucketStage}, util::{ObjectReference, VMWorkerThread}, vm::{ObjectTracerContext, Scanning, VMBinding, slot::Slot}
+    mmtk::{NULL_BUCKET, NUM_BUCKETS, OB_BUCKET},
+    plan::{
+        tracing::{gc_work::DefaultObjectTracerContext, SlotOfTrace, Trace},
+        VectorQueue,
+    },
+    scheduler::{GCWork, GCWorker, GCWorkerShared, WorkBucketStage, EDGES_WORK_BUFFER_SIZE},
+    util::{ObjectReference, VMWorkerThread},
+    vm::{slot::Slot, ObjectTracerContext, Scanning, VMBinding},
+    MMTK,
 };
+use std::sync::Mutex;
 
 pub struct AfterVMRefClosure<T: Trace> {
     phantom_data: PhantomData<T>,
@@ -15,7 +21,6 @@ pub struct AfterVMRefClosure<T: Trace> {
 
 impl<T: Trace> GCWork<T::VM> for AfterVMRefClosure<T> {
     fn do_work(&mut self, worker: &mut GCWorker<T::VM>, mmtk: &'static MMTK<T::VM>) {
-
         let stage = WorkBucketStage::VMRefClosure;
 
         let need_to_repeat = {
@@ -182,7 +187,12 @@ impl<T: Trace> ProcessSlots<T> {
         self.slots.push_back(slot);
     }
 
-    fn record_ref_dist(&mut self, slot: <<T as Trace>::VM as VMBinding>::VMSlot, obj: Option<ObjectReference>, dist_hist: &Mutex<[u64; NUM_BUCKETS]>) {
+    fn record_ref_dist(
+        &mut self,
+        slot: <<T as Trace>::VM as VMBinding>::VMSlot,
+        obj: Option<ObjectReference>,
+        dist_hist: &Mutex<[u64; NUM_BUCKETS]>,
+    ) {
         let mut dist_hist = dist_hist.lock().unwrap();
         if let Some(obj) = obj {
             debug!("slot_addr: {}", slot.addr());
@@ -225,7 +235,13 @@ impl<T: Trace> ProcessSlots<T> {
     }
 
     #[cfg(feature = "edge_enqueueing")]
-    fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T, all_slots_histogram: &Mutex<[u64; NUM_BUCKETS]>, unmarked_slots_histogram: &Mutex<[u64; NUM_BUCKETS]>) {
+    fn process_slots(
+        &mut self,
+        worker: &mut GCWorker<T::VM>,
+        trace: T,
+        all_slots_histogram: &Mutex<[u64; NUM_BUCKETS]>,
+        unmarked_slots_histogram: &Mutex<[u64; NUM_BUCKETS]>,
+    ) {
         let tls = worker.tls;
         while let Some(slot) = self.pop_slot() {
             let obj = slot.load();
@@ -322,7 +338,12 @@ impl<T: Trace> GCWork<T::VM> for ProcessSlots<T> {
         }
 
         #[cfg(feature = "edge_enqueueing")]
-        self.process_slots(worker, trace, &mmtk.all_slots_histogram, &mmtk.unmarked_slots_histogram);
+        self.process_slots(
+            worker,
+            trace,
+            &mmtk.all_slots_histogram,
+            &mmtk.unmarked_slots_histogram,
+        );
         #[cfg(not(feature = "edge_enqueueing"))]
         {
             let queue = self.process_slots(worker, trace);

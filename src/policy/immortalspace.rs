@@ -2,13 +2,13 @@ use atomic::Ordering;
 
 #[cfg(feature = "aux_trace")]
 use crate::policy::gc_work::TRACE_KIND_AUX;
-#[cfg(feature = "aux_trace")]
-use crate::util::metadata::MetadataSpec;
 use crate::policy::sft::SFT;
 use crate::policy::space::{CommonSpace, Space};
 use crate::util::address::Address;
 use crate::util::heap::{MonotonePageResource, PageResource};
 use crate::util::metadata::mark_bit::MarkState;
+#[cfg(feature = "aux_trace")]
+use crate::util::metadata::MetadataSpec;
 
 use crate::util::object_enum::{self, ObjectEnumerator};
 use crate::util::{metadata, ObjectReference};

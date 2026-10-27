@@ -22,11 +22,11 @@ use crate::vm::ObjectModel;
 use crate::vm::VMBinding;
 use crate::Plan;
 
+use crate::util::ObjectReference;
 use atomic::Ordering;
+use mmtk_macros::{HasSpaces, PlanTraceObject};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use crate::util::ObjectReference;
-use mmtk_macros::{HasSpaces, PlanTraceObject};
 
 use super::gc_work::StickyImmixMatureGCWorkContext;
 use super::gc_work::StickyImmixNurseryGCWorkContext;
