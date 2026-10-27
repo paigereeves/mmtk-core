@@ -23,6 +23,7 @@ use crate::util::opaque_pointer::*;
 use crate::vm::VMBinding;
 use enum_map::EnumMap;
 use mmtk_macros::{HasSpaces, PlanTraceObject};
+use crate::util::ObjectReference;
 
 /// [`Compressor`] implements a stop-the-world and parallel implementation of
 /// the Compressor, as described in Kermany and Petrank,

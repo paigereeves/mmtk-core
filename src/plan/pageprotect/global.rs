@@ -17,6 +17,7 @@ use crate::{
     util::opaque_pointer::VMWorkerThread,
 };
 use enum_map::EnumMap;
+use crate::util::ObjectReference;
 
 use mmtk_macros::{HasSpaces, PlanTraceObject};
 

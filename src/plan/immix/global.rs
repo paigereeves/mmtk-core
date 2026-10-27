@@ -20,7 +20,7 @@ use crate::util::metadata::side_metadata::SideMetadataContext;
 use crate::vm::VMBinding;
 use crate::{policy::immix::ImmixSpace, util::opaque_pointer::VMWorkerThread};
 use std::sync::atomic::AtomicBool;
-
+use crate::util::ObjectReference;
 use atomic::Ordering;
 use enum_map::EnumMap;
 

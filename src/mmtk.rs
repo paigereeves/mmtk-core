@@ -31,11 +31,15 @@ use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::default::Default;
 use std::fs;
+use std::fmt::Write as _;
+use std::io::Write as _;
 #[cfg(feature = "sanity")]
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Instant;
 
 lazy_static! {
     // I am not sure if we should include these mmappers as part of MMTk struct.
@@ -110,6 +114,13 @@ impl Default for MMTKBuilder {
     }
 }
 
+pub const NUM_BUCKETS: usize = 72;
+pub const NULL_BUCKET: usize = 70;
+pub const OB_BUCKET: usize = 71;
+/// Write the dist hist to `DIST_HIST_PATH` if true, otherwise to stdout.
+const PRINT_DIST_HIST_TO_FILE: bool = false;
+const DIST_HIST_DIR: &str = "output";
+const DIST_HIST_PATH: &str = "output/refdist.txt";
 /// An MMTk instance. MMTk allows multiple instances to run independently, and each instance gives users a separate heap.
 /// *Note that multi-instances is not fully supported yet*
 pub struct MMTK<VM: VMBinding> {
@@ -126,7 +137,11 @@ pub struct MMTK<VM: VMBinding> {
     pub(crate) slot_logger: SlotLogger<VM::VMSlot>,
     pub(crate) gc_trigger: Arc<GCTrigger<VM>>,
     pub(crate) stats: Arc<Stats>,
-    pub(crate) dist_hist: Mutex<[i32; 72]>,
+    pub(crate) all_slots_histogram: Mutex<[u64; NUM_BUCKETS]>,
+    pub(crate) unmarked_slots_histogram: Mutex<[u64; NUM_BUCKETS]>,
+    start_time: Instant,
+    /// Number of GCs whose dist hist has been recorded.
+    recorded_gc_count: AtomicUsize,
     #[cfg(feature = "sanity")]
     inside_sanity: AtomicBool,
     /// Analysis counters. The feature analysis allows us to periodically stop the world and collect some statistics.
@@ -225,6 +240,12 @@ impl<VM: VMBinding> MMTK<VM> {
         // Then intiialize SFT because it may use side metadata
         plan.initialize_sft();
 
+        // Create or clear the dist hist output file.
+        if PRINT_DIST_HIST_TO_FILE {
+            fs::create_dir_all(DIST_HIST_DIR).expect("failed to create dist hist output directory");
+            fs::File::create(DIST_HIST_PATH).expect("failed to create dist hist file");
+        }
+
         MMTK {
             options,
             state,
@@ -244,25 +265,61 @@ impl<VM: VMBinding> MMTK<VM> {
             analysis_manager: Arc::new(AnalysisManager::new(stats.clone())),
             gc_trigger,
             stats,
-            dist_hist: Mutex::new([0; 72]),
+            all_slots_histogram: Mutex::new([0; 72]),
+            unmarked_slots_histogram: Mutex::new([0; 72]),
+            start_time: Instant::now(),
+            recorded_gc_count: AtomicUsize::new(0),
         }
     }
 
-    pub fn print_dist_hist(&self) {
-        println!("Slot - object distance histogram:");
-        let dist_hist = self.dist_hist.lock().unwrap();
-        for i in 0..71 {
-            let n = dist_hist[i];
-            println!("{i}: {n}");
+    pub fn print_histograms(&self) {
+        // Build the whole histogram first so it is emitted in one go.
+        let mut out = String::new();
+        let recorded = self.recorded_gc_count.fetch_add(1, Ordering::SeqCst) + 1;
+        writeln!(
+            out,
+            "Slot - object distance histogram (GC {}, recorded GC {}, {} microseconds since start):",
+            self.stats.get_gc_count(),
+            recorded,
+            self.start_time.elapsed().as_micros()
+        )
+        .unwrap();
+        let all_slots_histogram = self.all_slots_histogram.lock().unwrap();
+        let unmarked_slots_histogram = self.unmarked_slots_histogram.lock().unwrap();
+        write!(out, "ALL SLOTS => ").unwrap();
+        for i in 0..(NUM_BUCKETS-2) {
+            let n = all_slots_histogram[i];
+            write!(out, "{i}: {n}, ").unwrap();
         }
-        println!("out of bounds: {}", dist_hist[71]);
+        write!(out, "\nUNMARKED SLOTS => ").unwrap();
+        for i in 0..(NUM_BUCKETS-2) {
+            let n = unmarked_slots_histogram[i];
+            write!(out, "{i}: {n}, ").unwrap();
+        }
+        writeln!(out, "\nnull references: {}", all_slots_histogram[NULL_BUCKET]).unwrap();
+        writeln!(out, "out of bounds references (all): {}", all_slots_histogram[OB_BUCKET]).unwrap();
+        writeln!(out, "out of bounds references (unmarked): {}", unmarked_slots_histogram[OB_BUCKET]).unwrap();
 
+        if PRINT_DIST_HIST_TO_FILE {
+            fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(DIST_HIST_PATH)
+                .and_then(|mut file| file.write_all(out.as_bytes()))
+                .expect("failed to write dist hist file");
+        } else {
+            print!("{out}");
+        }
     }
 
-    pub fn clear_dist_hist(&self) {
-        let mut dist_hist = self.dist_hist.lock().unwrap();
+    pub fn clear_histograms(&self) {
+        let mut unmarked = self.unmarked_slots_histogram.lock().unwrap();
         for i in 0..72 {
-            dist_hist[i] = 0;
+            unmarked[i] = 0;
+        }
+        let mut all = self.all_slots_histogram.lock().unwrap();
+        for i in 0..72 {
+            all[i] = 0;
         }
     }
 

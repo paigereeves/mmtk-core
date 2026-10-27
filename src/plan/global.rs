@@ -935,6 +935,11 @@ pub trait PlanTraceObject<VM: VMBinding> {
     ///
     /// See [`crate::plan::tracing::Trace::post_scan_object`].
     fn may_move_objects<const KIND: TraceKind>() -> bool;
+
+    fn obj_is_marked(&self, obj: ObjectReference) -> bool;
+
+    #[cfg(feature = "aux_trace")]
+    fn obj_is_aux_marked(&self, obj: ObjectReference) -> bool;
 }
 
 use enum_map::Enum;

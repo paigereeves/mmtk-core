@@ -154,6 +154,10 @@ impl Stats {
         counter
     }
 
+    pub fn get_gc_count(&self) -> usize {
+        self.gc_count.load(Ordering::SeqCst)
+    }
+
     pub fn start_gc(&self) {
         self.gc_count.fetch_add(1, Ordering::SeqCst);
         if !self.get_gathering_stats() {

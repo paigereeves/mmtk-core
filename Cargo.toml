@@ -96,10 +96,13 @@ name = "main"
 harness = false
 
 [features]
-default = ["builtin_env_logger", "log/release_max_level_off", "edge_enqueueing", "aux_trace"]
+default = ["builtin_env_logger", "log/release_max_level_off", "edge_enqueueing", "histogram_aux", "aux_trace"]
+
+histogram_aux = ["aux_trace"]
+histogram_real = []
 
 perf_closure = []
-perf_aux_closure = ["aux_trace"]
+perf_aux_closure = ["aux_trace"] 
 perf_gc = []
 perf_fullex = []
 

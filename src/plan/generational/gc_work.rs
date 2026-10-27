@@ -69,6 +69,15 @@ impl<VM: VMBinding, P: GenerationalPlanExt<VM> + PlanTraceObject<VM>, const KIND
         // if the "sticky_immix_non_moving_nursery" feature is enabled.
         true
     }
+
+    fn obj_is_marked(&self, obj: ObjectReference) -> bool {
+        self.plan.obj_is_marked(obj)
+    }
+
+    #[cfg(feature = "aux_trace")]
+    fn obj_is_aux_marked(&self, obj: ObjectReference) -> bool {
+        self.plan.obj_is_aux_marked(obj)
+    }
 }
 
 /// The modbuf contains a list of objects in mature space(s) that

@@ -29,6 +29,7 @@ use crate::vm::ObjectModel;
 use crate::vm::VMBinding;
 use crate::{policy::immix::ImmixSpace, util::opaque_pointer::VMWorkerThread};
 use std::sync::atomic::AtomicBool;
+use crate::util::ObjectReference;
 
 use atomic::Atomic;
 use atomic::Ordering;

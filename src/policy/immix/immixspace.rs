@@ -327,6 +327,25 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for ImmixSpace
             unreachable!()
         }
     }
+
+    fn obj_is_marked(&self, object: ObjectReference) -> bool {
+        let old_value = VM::VMObjectModel::LOCAL_MARK_BIT_SPEC.load_atomic::<VM, u8>(
+            object,
+            None,
+            Ordering::SeqCst,
+        );
+        old_value == 1
+    }
+
+    #[cfg(feature = "aux_trace")]
+    fn obj_is_aux_marked(&self, object: ObjectReference) -> bool {
+        let old_value = VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC.load_atomic::<VM, u8>(
+            object,
+            None,
+            Ordering::SeqCst,
+        );
+        old_value == 1
+    }
 }
 
 impl<VM: VMBinding> ImmixSpace<VM> {
