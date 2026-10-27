@@ -219,6 +219,19 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for Compressor
             unreachable!()
         }
     }
+
+    fn obj_is_marked(&self, obj: ObjectReference) -> bool {
+        Self::is_marked(obj)
+    }
+
+    #[cfg(feature = "aux_trace")]
+    fn obj_is_aux_marked(&self, obj: ObjectReference) -> bool {
+        return if cfg!(feature = "ovc_aux_trace") {
+            Self::is_aux_marked(obj)
+        } else {
+            CommonSpace::<VM>::obj_is_aux_marked(obj)
+        };
+    }
 }
 
 impl<VM: VMBinding> CompressorSpace<VM> {
@@ -300,6 +313,18 @@ impl<VM: VMBinding> CompressorSpace<VM> {
                 },
             )
             .is_ok()
+        } else {
+            unreachable!()
+        }
+    }
+        /// Atomically mark an object.
+    #[cfg(feature = "aux_trace")]
+    fn is_aux_marked(object: ObjectReference) -> bool {
+        if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC {
+            side.load_atomic::<u8>(
+                object.to_raw_address(),
+                Ordering::SeqCst,
+            ) == 1
         } else {
             unreachable!()
         }

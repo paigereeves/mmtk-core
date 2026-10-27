@@ -276,6 +276,15 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for LargeObjec
     fn may_move_objects<const KIND: crate::policy::gc_work::TraceKind>() -> bool {
         false
     }
+
+    fn obj_is_marked(&self, obj: ObjectReference) -> bool {
+        self.is_marked(obj)
+    }
+
+    #[cfg(feature = "aux_trace")]
+    fn obj_is_aux_marked(&self, obj: ObjectReference) -> bool {
+        return CommonSpace::<VM>::obj_is_aux_marked(obj);
+    }
 }
 
 impl<VM: VMBinding> LargeObjectSpace<VM> {

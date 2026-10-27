@@ -185,6 +185,15 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for CopySpace<
     fn may_move_objects<const KIND: crate::policy::gc_work::TraceKind>() -> bool {
         true
     }
+
+    fn obj_is_marked(&self, obj: ObjectReference) -> bool {
+        !self.is_from_space() || object_forwarding::is_forwarded_or_being_forwarded::<VM>(obj)
+    }
+
+    #[cfg(feature = "aux_trace")]
+    fn obj_is_aux_marked(&self, obj: ObjectReference) -> bool {
+        CommonSpace::<VM>::obj_is_aux_marked(obj)
+    }
 }
 
 impl<VM: VMBinding> CopySpace<VM> {

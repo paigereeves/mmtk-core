@@ -17,6 +17,7 @@ use crate::util::metadata::side_metadata::SideMetadataContext;
 use crate::util::opaque_pointer::VMWorkerThread;
 use crate::{plan::global::BasePlan, vm::VMBinding};
 use std::sync::atomic::{AtomicBool, Ordering};
+use crate::util::ObjectReference;
 
 use mmtk_macros::{HasSpaces, PlanTraceObject};
 

@@ -25,6 +25,8 @@ pub(crate) fn derive(input: DeriveInput) -> TokenStream2 {
     let post_scan_object_function =
         generate_post_scan_object(&post_scan_spaces, &parent, &ty_generics);
     let may_move_objects_function = generate_may_move_objects(&spaces, &parent, &ty_generics);
+    let obj_is_marked_function = generate_obj_is_marked(&spaces, &parent, &ty_generics);
+    let obj_is_aux_marked_function = generate_obj_is_aux_marked(&spaces, &parent, &ty_generics);
 
     quote! {
         impl #impl_generics crate::plan::PlanTraceObject #ty_generics for #ident #ty_generics #where_clause {
@@ -33,6 +35,10 @@ pub(crate) fn derive(input: DeriveInput) -> TokenStream2 {
             #post_scan_object_function
 
             #may_move_objects_function
+
+            #obj_is_marked_function
+
+            #obj_is_aux_marked_function
         }
     }
 }
@@ -172,5 +178,88 @@ pub(crate) fn generate_may_move_objects<'a>(
 
             false #(#space_handlers)* #parent_handler
         }
+    }
+}
+
+// The generated function needs to be inlined and constant folded. Otherwise, there will be a huge
+// performance penalty.
+pub(crate) fn generate_obj_is_marked<'a>(
+    space_fields: &[&'a Field],
+    parent_field: &Option<&'a Field>,
+    ty_generics: &TypeGenerics,
+) -> TokenStream2 {
+    let space_handlers = space_fields.iter().map(|f| {
+        let f_id = f.ident.as_ref().unwrap();
+        quote! {
+            if self.#f_id.in_space(obj) {
+                return self.#f_id.obj_is_marked(obj);
+            }
+        }
+    });
+
+    // Generate a fallback to the parent plan
+    let parent_field_delegator = if let Some(f) = parent_field {
+        let f_ident = f.ident.as_ref().unwrap();
+        let f_ty = &f.ty;
+        quote! {
+            <#f_ty as PlanTraceObject #ty_generics>::obj_is_marked(&self.#f_ident, obj)
+        }
+    } else {
+        quote! {
+            false
+        }
+    };
+
+
+    quote! {
+        fn obj_is_marked(&self, obj: ObjectReference) -> bool {
+            use crate::policy::sft::SFT;
+            use crate::policy::gc_work::PolicyTraceObject;
+            use crate::plan::PlanTraceObject;
+            #(#space_handlers)*
+            #parent_field_delegator
+        }
+
+    }
+}
+
+pub(crate) fn generate_obj_is_aux_marked<'a>(
+    space_fields: &[&'a Field],
+    parent_field: &Option<&'a Field>,
+    ty_generics: &TypeGenerics,
+) -> TokenStream2 {
+    let space_handlers = space_fields.iter().map(|f| {
+        let f_id = f.ident.as_ref().unwrap();
+        quote! {
+            if self.#f_id.in_space(obj) {
+                return self.#f_id.obj_is_aux_marked(obj);
+            }
+        }
+    });
+
+    // Generate a fallback to the parent plan
+    let parent_field_delegator = if let Some(f) = parent_field {
+        let f_ident = f.ident.as_ref().unwrap();
+        let f_ty = &f.ty;
+        quote! {
+            <#f_ty as PlanTraceObject #ty_generics>::obj_is_aux_marked(&self.#f_ident, obj)
+        }
+    } else {
+        quote! {
+            false
+        }
+    };
+
+
+    quote! {
+        #[cfg(feature = "aux_trace")]
+        fn obj_is_aux_marked(&self, obj: ObjectReference) -> bool {
+            use crate::policy::sft::SFT;
+            use crate::policy::gc_work::PolicyTraceObject;
+            use crate::plan::PlanTraceObject;
+            #(#space_handlers)*
+            #parent_field_delegator
+        }
+
     }
 }

@@ -4,14 +4,9 @@ use std::marker::PhantomData;
 
 use std::sync::Mutex;
 use crate::{
-    plan::{
-        tracing::{gc_work::DefaultObjectTracerContext, SlotOfTrace, Trace},
-        VectorQueue,
-    },
-    scheduler::{GCWork, GCWorker, GCWorkerShared, WorkBucketStage, EDGES_WORK_BUFFER_SIZE},
-    util::{ObjectReference, VMWorkerThread},
-    vm::{slot::Slot, ObjectTracerContext, Scanning, VMBinding},
-    MMTK,
+    MMTK, mmtk::{NULL_BUCKET, NUM_BUCKETS, OB_BUCKET}, plan::{
+        VectorQueue, tracing::{SlotOfTrace, Trace, gc_work::{DefaultObjectTracerContext}}
+    }, scheduler::{EDGES_WORK_BUFFER_SIZE, GCWork, GCWorker, GCWorkerShared, WorkBucketStage}, util::{ObjectReference, VMWorkerThread}, vm::{ObjectTracerContext, Scanning, VMBinding, slot::Slot}
 };
 
 pub struct AfterVMRefClosure<T: Trace> {
@@ -20,6 +15,7 @@ pub struct AfterVMRefClosure<T: Trace> {
 
 impl<T: Trace> GCWork<T::VM> for AfterVMRefClosure<T> {
     fn do_work(&mut self, worker: &mut GCWorker<T::VM>, mmtk: &'static MMTK<T::VM>) {
+
         let stage = WorkBucketStage::VMRefClosure;
 
         let need_to_repeat = {
@@ -36,9 +32,12 @@ impl<T: Trace> GCWork<T::VM> for AfterVMRefClosure<T> {
             return;
         }
 
+        #[cfg(feature = "histogram_real")]
+        if !mmtk.get_plan().is_nursery_gc() {
+            mmtk.print_histograms();
+        }
         #[cfg(feature = "perf_closure")]
         mmtk.stats.perf_ctrl_disable();
-        mmtk.print_dist_hist();
     }
 }
 
@@ -54,6 +53,8 @@ pub struct AfterPrepare {}
 
 impl<VM: VMBinding> GCWork<VM> for AfterPrepare {
     fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
+        #[cfg(any(feature = "histogram_aux", feature = "histogram_real"))]
+        mmtk.clear_histograms();
         #[cfg(feature = "perf_aux_closure")]
         if !crate::plan::is_nursery_gc(mmtk.get_plan()) {
             mmtk.stats.perf_ctrl_enable();
@@ -80,6 +81,12 @@ pub struct AfterAuxClosure {}
 #[cfg(feature = "aux_trace")]
 impl<VM: VMBinding> GCWork<VM> for AfterAuxClosure {
     fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
+        #[cfg(feature = "histogram_aux")]
+        if !mmtk.get_plan().is_nursery_gc() {
+            mmtk.print_histograms();
+        }
+        #[cfg(feature = "histogram_real")]
+        mmtk.clear_histograms();
         #[cfg(feature = "perf_aux_closure")]
         mmtk.stats.perf_ctrl_disable();
 
@@ -99,42 +106,6 @@ impl<VM: VMBinding> GCWork<VM> for AfterAuxClosure {
 
 #[cfg(feature = "aux_trace")]
 impl AfterAuxClosure {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-#[cfg(not(any(feature = "perf_closure", feature = "perf_aux_closure")))]
-pub struct AfterClosure {}
-
-#[cfg(not(any(feature = "perf_closure", feature = "perf_aux_closure")))]
-impl<VM: VMBinding> GCWork<VM> for AfterClosure {
-    fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
-        if !crate::plan::is_nursery_gc(mmtk.get_plan()) {
-            mmtk.print_dist_hist();
-        }
-    }
-}
-
-#[cfg(not(any(feature = "perf_closure", feature = "perf_aux_closure")))]
-impl AfterClosure {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-#[cfg(not(any(feature = "perf_closure", feature = "perf_aux_closure")))]
-pub struct BeforeClosure {}
-
-#[cfg(not(any(feature = "perf_closure", feature = "perf_aux_closure")))]
-impl<VM: VMBinding> GCWork<VM> for BeforeClosure {
-    fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
-        mmtk.clear_dist_hist();
-    }
-}
-
-#[cfg(not(any(feature = "perf_closure", feature = "perf_aux_closure")))]
-impl BeforeClosure {
     pub fn new() -> Self {
         Self {}
     }
@@ -211,51 +182,64 @@ impl<T: Trace> ProcessSlots<T> {
         self.slots.push_back(slot);
     }
 
-    fn record_ref_dist(&mut self, slot: <<T as Trace>::VM as VMBinding>::VMSlot, obj: Option<ObjectReference>, dist_hist: &Mutex<[i32; 72]>) {
+    fn record_ref_dist(&mut self, slot: <<T as Trace>::VM as VMBinding>::VMSlot, obj: Option<ObjectReference>, dist_hist: &Mutex<[u64; NUM_BUCKETS]>) {
         let mut dist_hist = dist_hist.lock().unwrap();
         if let Some(obj) = obj {
-            // println!("slot_addr: {}", slot.addr());
-            // println!("obj_addr: {}", obj);
+            debug!("slot_addr: {}", slot.addr());
+            debug!("obj_addr: {}", obj);
             let obj_addr = obj.to_object_start::<<T as Trace>::VM>().as_usize() as i128;
             let slot_addr = slot.addr().as_usize() as i128;
-            // println!("{} - {}", obj_addr, slot_addr);
-            let dist = obj_addr - slot_addr;
-            // println!("dist: {}", dist);
-            if dist == 0 {
-                dist_hist[35] += 1;
-                assert!(false);
-            } else if dist > 0 {
+            assert!(obj_addr != slot_addr);
+
+            if obj_addr > slot_addr {
+                // slot points forward
+                let dist = obj_addr - slot_addr;
+                debug!("dist: {}", dist);
                 let log = dist.ilog2();
-                // println!("log dist: {}", log);
-                if (log + 32) > 70 {
+                debug!("log: {}", log);
+                if log > 34 {
                     // out of bounds
-                    dist_hist[71] += 1;
+                    debug!("ob");
+                    dist_hist[OB_BUCKET] += 1;
                 } else {
+                    debug!("bucket: {}", log as usize + 35);
                     dist_hist[log as usize + 35] += 1;
                 }
             } else {
-                // println!("(-dist).ilog2() = {}", (-dist).ilog2());
-                let log = (-dist).ilog2();
-                // println!("log dist: -{}", log);
-                if 35 < log {
+                let dist = slot_addr - obj_addr;
+                debug!("dist: {}", dist);
+                let log = dist.ilog2();
+                debug!("log: {}", log);
+                if log > 34 {
                     // out of bounds
-                    dist_hist[71] += 1;
+                    debug!("ob");
+                    dist_hist[OB_BUCKET] += 1;
                 } else {
-                    dist_hist[35 - (log as usize)] += 1;
+                    debug!("bucket: {}", 34 - log as usize);
+                    dist_hist[34 - log as usize] += 1;
                 }
             }
         } else {
-            dist_hist[35] += 1;
+            dist_hist[NULL_BUCKET] += 1;
         }
     }
 
     #[cfg(feature = "edge_enqueueing")]
-    fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T, dist_hist: &Mutex<[i32; 72]>) {
+    fn process_slots(&mut self, worker: &mut GCWorker<T::VM>, trace: T, all_slots_histogram: &Mutex<[u64; NUM_BUCKETS]>, unmarked_slots_histogram: &Mutex<[u64; NUM_BUCKETS]>) {
         let tls = worker.tls;
         while let Some(slot) = self.pop_slot() {
             let obj = slot.load();
-            self.record_ref_dist(slot, obj, dist_hist);
+            #[cfg(any(feature = "histogram_aux", feature = "histogram_real"))]
+            self.record_ref_dist(slot, obj, all_slots_histogram);
             if let Some(object) = obj {
+                #[cfg(feature = "histogram_aux")]
+                if !trace.obj_is_aux_marked(object) {
+                    self.record_ref_dist(slot, obj, unmarked_slots_histogram);
+                }
+                #[cfg(feature = "histogram_real")]
+                if !trace.obj_is_marked(object) {
+                    self.record_ref_dist(slot, obj, unmarked_slots_histogram);
+                }
                 let new_object = trace.trace_object(worker, object, &mut |enqueued_object| {
                     debug_assert!(
                         <T::VM as VMBinding>::VMScanning::support_slot_enqueuing(
@@ -338,7 +322,7 @@ impl<T: Trace> GCWork<T::VM> for ProcessSlots<T> {
         }
 
         #[cfg(feature = "edge_enqueueing")]
-        self.process_slots(worker, trace, &mmtk.dist_hist);
+        self.process_slots(worker, trace, &mmtk.all_slots_histogram, &mmtk.unmarked_slots_histogram);
         #[cfg(not(feature = "edge_enqueueing"))]
         {
             let queue = self.process_slots(worker, trace);

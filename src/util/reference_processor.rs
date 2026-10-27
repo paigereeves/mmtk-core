@@ -93,12 +93,14 @@ impl ReferenceProcessors {
         trace: &mut OT,
         mmtk: &'static MMTK<VM>,
     ) {
+        info!("retain_soft_refs");
         self.soft
             .retain::<VM, OT>(trace, is_nursery_gc(mmtk.get_plan()));
     }
 
     /// Scan soft references.
     pub fn scan_soft_refs<VM: VMBinding>(&self, mmtk: &'static MMTK<VM>) {
+        info!("scan_soft_refs");
         // This will update the references (and the referents).
         self.soft.scan::<VM>(is_nursery_gc(mmtk.get_plan()));
     }

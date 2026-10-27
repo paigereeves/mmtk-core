@@ -33,12 +33,10 @@ use crate::util::heap::layout::VMMap;
 use crate::util::heap::space_descriptor::SpaceDescriptor;
 use crate::util::heap::HeapMeta;
 use crate::util::os::*;
-#[cfg(feature = "aux_trace")]
 use crate::vm::object_model::ObjectModel;
 use crate::vm::VMBinding;
 
 use std::marker::PhantomData;
-#[cfg(feature = "aux_trace")]
 use std::sync::atomic::Ordering;
 
 use std::sync::atomic::AtomicBool;
@@ -774,6 +772,25 @@ impl<VM: VMBinding> CommonSpace<VM> {
             }
         }
         object
+    }
+
+    pub fn obj_is_marked(object: ObjectReference) -> bool {
+        let old_value = VM::VMObjectModel::LOCAL_MARK_BIT_SPEC.load_atomic::<VM, u8>(
+            object,
+            None,
+            Ordering::SeqCst,
+        );
+        return old_value == 1;
+    }
+
+    #[cfg(feature = "aux_trace")]
+    pub fn obj_is_aux_marked(object: ObjectReference) -> bool {
+        let old_value = VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC.load_atomic::<VM, u8>(
+            object,
+            None,
+            Ordering::SeqCst,
+        );
+        return old_value == 1;
     }
 
     /// Atomically mark an object.

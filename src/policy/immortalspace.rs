@@ -2,13 +2,13 @@ use atomic::Ordering;
 
 #[cfg(feature = "aux_trace")]
 use crate::policy::gc_work::TRACE_KIND_AUX;
+#[cfg(feature = "aux_trace")]
+use crate::util::metadata::MetadataSpec;
 use crate::policy::sft::SFT;
 use crate::policy::space::{CommonSpace, Space};
 use crate::util::address::Address;
 use crate::util::heap::{MonotonePageResource, PageResource};
 use crate::util::metadata::mark_bit::MarkState;
-#[cfg(feature = "aux_trace")]
-use crate::util::metadata::MetadataSpec;
 
 use crate::util::object_enum::{self, ObjectEnumerator};
 use crate::util::{metadata, ObjectReference};
@@ -158,6 +158,13 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for ImmortalSp
     }
     fn may_move_objects<const KIND: crate::policy::gc_work::TraceKind>() -> bool {
         false
+    }
+    fn obj_is_marked(&self, obj: ObjectReference) -> bool {
+        self.mark_state.is_marked::<VM>(obj)
+    }
+    #[cfg(feature = "aux_trace")]
+    fn obj_is_aux_marked(&self, obj: ObjectReference) -> bool {
+        CommonSpace::<VM>::obj_is_aux_marked(obj)
     }
 }
 

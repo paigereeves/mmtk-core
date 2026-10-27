@@ -42,4 +42,9 @@ pub trait PolicyTraceObject<VM: VMBinding> {
 
     /// Return whether the policy moves objects.
     fn may_move_objects<const KIND: TraceKind>() -> bool;
+
+    fn obj_is_marked(&self, _obj: ObjectReference) -> bool { unimplemented!() }
+
+    #[cfg(feature = "aux_trace")]
+    fn obj_is_aux_marked(&self, _obj: ObjectReference) -> bool { unimplemented!() }
 }

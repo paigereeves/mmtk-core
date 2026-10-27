@@ -27,6 +27,7 @@ use crate::policy::marksweepspace::malloc_ms::MAX_OBJECT_SIZE;
 pub type MarkSweepSpace<VM> = crate::policy::marksweepspace::native_ms::MarkSweepSpace<VM>;
 #[cfg(not(feature = "malloc_mark_sweep"))]
 use crate::policy::marksweepspace::native_ms::MAX_OBJECT_SIZE;
+use crate::util::ObjectReference;
 
 #[derive(HasSpaces, PlanTraceObject)]
 pub struct MarkSweep<VM: VMBinding> {
