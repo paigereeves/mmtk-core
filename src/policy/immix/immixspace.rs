@@ -372,7 +372,7 @@ impl<VM: VMBinding> ImmixSpace<VM> {
             );
         }
 
-        #[cfg(feature = "aux_trace")]
+        #[cfg(feature = "ix_aux_trace")]
         assert!(!args.unlog_traced_object);
 
         // Make sure we override the space args if we force non moving Immix

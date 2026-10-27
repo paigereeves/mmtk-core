@@ -1,9 +1,9 @@
 use crate::util::constants::BYTES_IN_WORD;
 use crate::util::linear_scan::{Region, RegionIterator};
-#[cfg(feature = "aux_trace")]
-use crate::util::metadata::MetadataSpec;
 use crate::util::metadata::side_metadata::spec_defs::{COMPRESSOR_MARK, COMPRESSOR_OFFSET_VECTOR};
 use crate::util::metadata::side_metadata::SideMetadataSpec;
+#[cfg(feature = "aux_trace")]
+use crate::util::metadata::MetadataSpec;
 use crate::util::{Address, ObjectReference};
 use crate::vm::object_model::ObjectModel;
 use crate::vm::VMBinding;

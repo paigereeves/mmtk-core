@@ -74,6 +74,10 @@ impl<VM: VMBinding> Plan for GenImmix<VM> {
         &GENIMMIX_CONSTRAINTS
     }
 
+    fn is_nursery_gc(&self) -> bool {
+        self.gen.is_current_gc_nursery()
+    }
+
     fn create_copy_config(&'static self) -> CopyConfig<Self::VM> {
         use enum_map::enum_map;
         CopyConfig {

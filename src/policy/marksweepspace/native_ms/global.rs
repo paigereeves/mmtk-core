@@ -1,8 +1,5 @@
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
-
+#[cfg(feature = "aux_trace")]
+use crate::policy::gc_work::TRACE_KIND_AUX;
 use crate::{
     policy::{marksweepspace::native_ms::*, sft::GCWorkerMutRef},
     scheduler::{GCWorkScheduler, GCWorker, WorkBucketStage},
@@ -15,6 +12,10 @@ use crate::{
         ObjectReference,
     },
     vm::{ActivePlan, VMBinding},
+};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
 };
 
 #[cfg(feature = "vo_bit")]
@@ -277,6 +278,10 @@ impl<VM: VMBinding> crate::policy::gc_work::PolicyTraceObject<VM> for MarkSweepS
         _copy: Option<CopySemantics>,
         _worker: &mut GCWorker<VM>,
     ) -> ObjectReference {
+        #[cfg(feature = "aux_trace")]
+        if KIND == TRACE_KIND_AUX {
+            return self.common.trace_aux(queue, object);
+        }
         self.trace_object(queue, object)
     }
 
@@ -315,6 +320,8 @@ impl<VM: VMBinding> MarkSweepSpace<VM> {
                 MetadataSpec::OnSide(Block::TLS_TABLE),
                 MetadataSpec::OnSide(Block::MARK_TABLE),
                 *VM::VMObjectModel::LOCAL_MARK_BIT_SPEC,
+                #[cfg(feature = "aux_trace")]
+                *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC,
             ])
         };
         let common = CommonSpace::new(args.into_policy_args(false, false, local_specs));
@@ -597,6 +604,10 @@ impl<VM: VMBinding> GCWork<VM> for PrepareChunkMap<VM> {
         } else {
             // Otherwise this chunk is occupied, and we reset the mark bit if it is on the side.
             if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_MARK_BIT_SPEC {
+                side.bzero_metadata(self.chunk.start(), Chunk::BYTES);
+            }
+            #[cfg(feature = "aux_trace")]
+            if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC {
                 side.bzero_metadata(self.chunk.start(), Chunk::BYTES);
             }
         }

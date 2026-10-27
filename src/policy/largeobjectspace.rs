@@ -321,6 +321,24 @@ impl<VM: VMBinding> LargeObjectSpace<VM> {
         }
         self.treadmill.flip(full_heap);
         self.in_nursery_gc = !full_heap;
+        #[cfg(feature = "aux_trace")]
+        self.clear_aux_mark_bits();
+    }
+
+    /// Clear the aux mark bit of every object.  Unlike the LOS mark bit, the aux mark bit does not
+    /// flip between GCs, so it must be reset before each aux trace.
+    #[cfg(feature = "aux_trace")]
+    fn clear_aux_mark_bits(&self) {
+        let mut enumerator = ClosureObjectEnumerator::<_, VM>::new(|object| {
+            VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC.store_atomic::<VM, u8>(
+                object,
+                0,
+                None,
+                Ordering::SeqCst,
+            );
+        });
+        // Visit all objects, including the collection nursery and from-space after the flip.
+        self.treadmill.enumerate_objects(&mut enumerator, true);
     }
 
     pub fn release(&mut self, full_heap: bool) {

@@ -1,8 +1,7 @@
-use std::marker::PhantomData;
 #[cfg(feature = "mark_queue")]
 use std::collections::VecDeque;
+use std::marker::PhantomData;
 
-#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
 use crate::{
     plan::{
         tracing::{gc_work::DefaultObjectTracerContext, SlotOfTrace, Trace},
@@ -14,43 +13,79 @@ use crate::{
     MMTK,
 };
 
-#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
-pub struct AfterClosure {}
+pub struct AfterVMRefClosure<T: Trace> {
+    phantom_data: PhantomData<T>,
+}
 
-#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
-impl<VM: VMBinding> GCWork<VM> for AfterClosure {
-    fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
+impl<T: Trace> GCWork<T::VM> for AfterVMRefClosure<T> {
+    fn do_work(&mut self, worker: &mut GCWorker<T::VM>, mmtk: &'static MMTK<T::VM>) {
+        let stage = WorkBucketStage::VMRefClosure;
+
+        let need_to_repeat = {
+            let tracer_factory = DefaultObjectTracerContext::<T>::new(stage);
+            <T::VM as VMBinding>::VMScanning::process_weak_refs(worker, tracer_factory)
+        };
+
+        if need_to_repeat {
+            // Schedule Self as the new sentinel so we'll call `process_weak_refs` again after the
+            // current transitive closure.
+            let new_self = Box::new(Self::new());
+
+            worker.scheduler().work_buckets[stage].set_sentinel(new_self);
+            return;
+        }
+
+        #[cfg(feature = "perf_closure")]
         mmtk.stats.perf_ctrl_disable();
     }
 }
 
-#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
-impl AfterClosure {
+impl<T: Trace> AfterVMRefClosure<T> {
+    pub fn new() -> Self {
+        Self {
+            phantom_data: PhantomData,
+        }
+    }
+}
+
+pub struct AfterPrepare {}
+
+impl<VM: VMBinding> GCWork<VM> for AfterPrepare {
+    fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
+        #[cfg(feature = "perf_aux_closure")]
+        if !mmtk.get_plan().is_nursery_gc() {
+            mmtk.stats.perf_ctrl_enable();
+        }
+        #[cfg(all(not(feature = "aux_trace"), feature = "perf_closure"))]
+        if !mmtk.get_plan().is_nursery_gc() {
+            mmtk.stats.perf_ctrl_enable();
+        }
+    }
+}
+
+impl AfterPrepare {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
-pub struct BeforeClosure {}
+#[cfg(feature = "aux_trace")]
+pub struct AfterAuxClosure {}
 
-#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
-impl<VM: VMBinding> GCWork<VM> for BeforeClosure {
+#[cfg(feature = "aux_trace")]
+impl<VM: VMBinding> GCWork<VM> for AfterAuxClosure {
     fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
-        // #[cfg(feature = "disrupt_cache")]
-        // {
-        //     let llc_size: usize = 30 * 1024 * 1024; // ADL, 30Mb
-        //     let mut v = vec![0u8; llc_size];
-        //     for item in v.iter_mut() {
-        //         *item += 1;
-        //     }
-        // }
-        mmtk.stats.perf_ctrl_enable();
+        #[cfg(feature = "perf_aux_closure")]
+        mmtk.stats.perf_ctrl_disable();
+        #[cfg(feature = "perf_closure")]
+        if !mmtk.get_plan().is_nursery_gc() {
+            mmtk.stats.perf_ctrl_enable();
+        }
     }
 }
 
-#[cfg(any(feature = "perf_closure", feature = "perf_aux_closure"))]
-impl BeforeClosure {
+#[cfg(feature = "aux_trace")]
+impl AfterAuxClosure {
     pub fn new() -> Self {
         Self {}
     }
@@ -76,11 +111,9 @@ impl<T: Trace> ProcessSlots<T> {
     const SCAN_OBJECTS_IMMEDIATELY: bool = true;
 
     pub fn new(
-        #[cfg(not(feature = "mark_queue"))]
-        slots: Vec<SlotOfTrace<T>>,
-        #[cfg(feature = "mark_queue")]
-        slots: VecDeque<SlotOfTrace<T>>,
-        bucket: WorkBucketStage
+        #[cfg(not(feature = "mark_queue"))] slots: Vec<SlotOfTrace<T>>,
+        #[cfg(feature = "mark_queue")] slots: VecDeque<SlotOfTrace<T>>,
+        bucket: WorkBucketStage,
     ) -> Self {
         Self {
             slots,

@@ -7,6 +7,8 @@ use crate::policy::space::{CommonSpace, Space};
 use crate::util::address::Address;
 use crate::util::heap::{MonotonePageResource, PageResource};
 use crate::util::metadata::mark_bit::MarkState;
+#[cfg(feature = "aux_trace")]
+use crate::util::metadata::MetadataSpec;
 
 use crate::util::object_enum::{self, ObjectEnumerator};
 use crate::util::{metadata, ObjectReference};
@@ -195,6 +197,14 @@ impl<VM: VMBinding> ImmortalSpace<VM> {
             );
             self.mark_state.on_block_reset::<VM>(addr, size);
         }
+        #[cfg(feature = "aux_trace")]
+        self.pr
+            .iterate_allocated_regions()
+            .for_each(|(start, size)| {
+                if let MetadataSpec::OnSide(side) = *VM::VMObjectModel::LOCAL_AUX_MARK_BIT_SPEC {
+                    side.bzero_metadata(start, size);
+                }
+            });
     }
 
     pub fn release(&mut self) {

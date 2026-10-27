@@ -315,14 +315,12 @@ pub enum WorkBucketStage {
     /// Preparation work.  Plans, spaces, GC workers, mutators, etc. should be prepared for GC at
     /// this stage.
     Prepare,
+    #[cfg(feature = "aux_trace")]
     AuxiliaryTPinningClosure,
+    #[cfg(feature = "aux_trace")]
     AuxiliaryPinningRootsTrace,
+    #[cfg(feature = "aux_trace")]
     AuxiliaryClosure,
-    // AuxiliarySoftRefClosure,
-    // AuxiliaryWeakRefClosure,
-    // AuxiliaryFinalRefClosure,
-    // AuxiliaryPhantomRefClosure,
-    // AuxiliaryVMRefClosure,
     /// Clear the VO bit metadata.  Mainly used by ImmixSpace.
     #[cfg(feature = "vo_bit")]
     ClearVOBits,

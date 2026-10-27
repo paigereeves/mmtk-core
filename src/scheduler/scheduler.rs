@@ -8,10 +8,10 @@ use super::worker_goals::{WorkerGoal, WorkerGoals};
 use super::worker_monitor::{LastParkedResult, WorkerMonitor};
 use super::*;
 use crate::mmtk::MMTK;
-use crate::plan::tracing::gc_work::closure::{AfterClosure, BeforeClosure};
-use crate::plan::tracing::gc_work::weakref::{
-    VMForwardWeakRefs, VMPostForwarding, VMProcessWeakRefs,
-};
+#[cfg(feature = "aux_trace")]
+use crate::plan::tracing::gc_work::closure::AfterAuxClosure;
+use crate::plan::tracing::gc_work::closure::{AfterPrepare, AfterVMRefClosure};
+use crate::plan::tracing::gc_work::weakref::{VMForwardWeakRefs, VMPostForwarding};
 use crate::util::opaque_pointer::*;
 use crate::util::options::AffinityKind;
 use crate::vm::Collection;
@@ -180,17 +180,11 @@ impl<VM: VMBinding> GCWorkScheduler<VM> {
             };
             self.work_buckets[WorkBucketStage::SoftRefClosure]
                 .add(SoftRefProcessing::<C::DefaultTrace>::new());
-            // self.work_buckets[WorkBucketStage::AuxiliarySoftRefClosure]
-            //     .add(SoftRefProcessing::<C::AuxiliaryTrace>::new(WorkBucketStage::AuxiliarySoftRefClosure));
 
             self.work_buckets[WorkBucketStage::WeakRefClosure].add(WeakRefProcessing::<VM>::new());
-            // self.work_buckets[WorkBucketStage::AuxiliaryWeakRefClosure]
-            //     .add(WeakRefProcessing::<VM>::new());
 
             self.work_buckets[WorkBucketStage::PhantomRefClosure]
                 .add(PhantomRefProcessing::<VM>::new());
-            // self.work_buckets[WorkBucketStage::AuxiliaryPhantomRefClosure]
-            //     .add(PhantomRefProcessing::<VM>::new());
 
             use crate::util::reference_processor::RefForwarding;
             if plan.constraints().needs_forward_after_liveness {
@@ -239,9 +233,7 @@ impl<VM: VMBinding> GCWorkScheduler<VM> {
         // because there are no other packets in the bucket.  We set it as sentinel for
         // consistency.
         self.work_buckets[WorkBucketStage::VMRefClosure]
-            .set_sentinel(Box::new(VMProcessWeakRefs::<C::DefaultTrace>::new()));
-        // self.work_buckets[WorkBucketStage::AuxiliaryVMRefClosure]
-        //     .set_sentinel(Box::new(VMProcessWeakRefs::<C::AuxiliaryTrace>::new()));
+            .set_sentinel(Box::new(AfterVMRefClosure::<C::DefaultTrace>::new()));
 
         if plan.constraints().needs_forward_after_liveness {
             // VM-specific weak ref forwarding
@@ -251,24 +243,11 @@ impl<VM: VMBinding> GCWorkScheduler<VM> {
 
         self.work_buckets[WorkBucketStage::Release].add(VMPostForwarding::<VM>::default());
 
-        if cfg!(feature = "perf_closure") {
-            if cfg!(feature = "aux_trace") {
-                self.work_buckets[WorkBucketStage::AuxiliaryClosure]
-                    .set_sentinel(Box::new(BeforeClosure::new()));
-                self.work_buckets[WorkBucketStage::Closure]
-                    .set_sentinel(Box::new(AfterClosure::new()));
-            } else {
-                self.work_buckets[WorkBucketStage::Prepare]
-                    .set_sentinel(Box::new(BeforeClosure::new()));
-                self.work_buckets[WorkBucketStage::Closure]
-                    .set_sentinel(Box::new(AfterClosure::new()));
-            }
-        } else if cfg!(feature = "perf_aux_closure") {
-            self.work_buckets[WorkBucketStage::Prepare]
-                .set_sentinel(Box::new(BeforeClosure::new()));
-            self.work_buckets[WorkBucketStage::AuxiliaryClosure]
-                .set_sentinel(Box::new(AfterClosure::new()));
-        }
+        self.work_buckets[WorkBucketStage::Prepare].set_sentinel(Box::new(AfterPrepare::new()));
+
+        #[cfg(feature = "aux_trace")]
+        self.work_buckets[WorkBucketStage::AuxiliaryClosure]
+            .set_sentinel(Box::new(AfterAuxClosure::new()));
     }
 
     fn are_buckets_drained(&self, buckets: &[WorkBucketStage]) -> bool {

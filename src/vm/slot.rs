@@ -154,6 +154,8 @@ pub trait Slot: Copy + Send + Sync + Debug + PartialEq + Eq + Hash {
     fn prefetch_store(&self) {
         // no-op by default
     }
+
+    fn addr(&self) -> Address;
 }
 
 /// A simple slot implementation that represents a word-sized slot which holds the raw address of
@@ -197,6 +199,10 @@ impl Slot for SimpleSlot {
     fn store(&self, object: ObjectReference) {
         unsafe { (*self.slot_addr).store(object.to_raw_address(), atomic::Ordering::Relaxed) }
     }
+
+    fn addr(&self) -> Address {
+        self.as_address()
+    }
 }
 
 /// For backword compatibility, we let `Address` implement `Slot` with the same semantics as
@@ -217,6 +223,10 @@ impl Slot for Address {
 
     fn store(&self, object: ObjectReference) {
         unsafe { Address::store(*self, object) }
+    }
+
+    fn addr(&self) -> Address {
+        *self
     }
 }
 

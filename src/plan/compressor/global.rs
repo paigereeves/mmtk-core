@@ -5,10 +5,10 @@ use crate::plan::global::CreateGeneralPlanArgs;
 use crate::plan::global::CreateSpecificPlanArgs;
 use crate::plan::global::{BasePlan, CommonPlan};
 use crate::plan::plan_constraints::MAX_NON_LOS_ALLOC_BYTES_COPYING_PLAN;
-use crate::plan::tracing::gc_work::closure::{AfterClosure, BeforeClosure};
-use crate::plan::tracing::gc_work::weakref::{
-    VMForwardWeakRefs, VMPostForwarding, VMProcessWeakRefs,
-};
+#[cfg(feature = "aux_trace")]
+use crate::plan::tracing::gc_work::closure::AfterAuxClosure;
+use crate::plan::tracing::gc_work::closure::{AfterPrepare, AfterVMRefClosure};
+use crate::plan::tracing::gc_work::weakref::{VMForwardWeakRefs, VMPostForwarding};
 use crate::plan::{AllocationSemantics, Plan, PlanConstraints};
 use crate::policy::compressor::CompressorSpace;
 use crate::policy::space::Space;
@@ -151,7 +151,7 @@ impl<VM: VMBinding> Plan for Compressor<VM> {
 
         // VM-specific weak ref processing
         scheduler.work_buckets[WorkBucketStage::VMRefClosure]
-            .set_sentinel(Box::new(VMProcessWeakRefs::<MarkingTrace<VM>>::new()));
+            .set_sentinel(Box::new(AfterVMRefClosure::<MarkingTrace<VM>>::new()));
 
         // VM-specific weak ref forwarding
         scheduler.work_buckets[WorkBucketStage::VMRefForwarding]
@@ -160,24 +160,12 @@ impl<VM: VMBinding> Plan for Compressor<VM> {
         // VM-specific work after forwarding, possible to implement ref enququing.
         scheduler.work_buckets[WorkBucketStage::Release].add(VMPostForwarding::<VM>::default());
 
-        if cfg!(feature = "perf_closure") {
-            if cfg!(feature = "aux_trace") {
-                scheduler.work_buckets[WorkBucketStage::AuxiliaryClosure]
-                    .set_sentinel(Box::new(BeforeClosure::new()));
-                scheduler.work_buckets[WorkBucketStage::Closure]
-                    .set_sentinel(Box::new(AfterClosure::new()));
-            } else {
-                scheduler.work_buckets[WorkBucketStage::Prepare]
-                    .set_sentinel(Box::new(BeforeClosure::new()));
-                scheduler.work_buckets[WorkBucketStage::Closure]
-                    .set_sentinel(Box::new(AfterClosure::new()));
-            }
-        } else if cfg!(feature = "perf_aux_closure") {
-            scheduler.work_buckets[WorkBucketStage::Prepare]
-                .set_sentinel(Box::new(BeforeClosure::new()));
-            scheduler.work_buckets[WorkBucketStage::AuxiliaryClosure]
-                .set_sentinel(Box::new(AfterClosure::new()));
-        }
+        scheduler.work_buckets[WorkBucketStage::Prepare]
+            .set_sentinel(Box::new(AfterPrepare::new()));
+
+        #[cfg(feature = "aux_trace")]
+        scheduler.work_buckets[WorkBucketStage::AuxiliaryClosure]
+            .set_sentinel(Box::new(AfterAuxClosure::new()));
 
         // Analysis GC work
         #[cfg(feature = "analysis")]

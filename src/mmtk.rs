@@ -142,6 +142,9 @@ impl<VM: VMBinding> MMTK<VM> {
         // Verify the Mmapper can handle the required address space size.
         vm_layout().validate_address_space();
 
+        assert!(!cfg!(feature = "vm_space"));
+        assert!(cfg!(feature = "edge_enqueueing"));
+
         // Initialize SFT first in case we need to use this in the constructor.
         // The first call will initialize SFT map. Other calls will be blocked until SFT map is initialized.
         crate::policy::sft_map::SFTRefStorage::pre_use_check();

@@ -97,11 +97,12 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>, AT: Trace<VM = VM>>
             WorkBucketStage::PinningRootsTrace,
             ProcessPinningRoots::<VM, PT, DT>::new(nodes.clone(), WorkBucketStage::Closure),
         );
+        #[cfg(feature = "aux_trace")]
         if !self.mmtk.scheduler.work_buckets[WorkBucketStage::Closure].is_open() {
             crate::memory_manager::add_work_packet(
                 self.mmtk,
                 WorkBucketStage::AuxiliaryPinningRootsTrace,
-                ProcessPinningRoots::<VM, PT, DT>::new(nodes, WorkBucketStage::AuxiliaryClosure),
+                ProcessPinningRoots::<VM, AT, AT>::new(nodes, WorkBucketStage::AuxiliaryClosure),
             );
         }
     }
@@ -121,11 +122,12 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>, AT: Trace<VM = VM>>
             WorkBucketStage::TPinningClosure,
             ProcessPinningRoots::<VM, PT, PT>::new(nodes.clone(), WorkBucketStage::TPinningClosure),
         );
+        #[cfg(feature = "aux_trace")]
         if !self.mmtk.scheduler.work_buckets[WorkBucketStage::TPinningClosure].is_open() {
             crate::memory_manager::add_work_packet(
                 self.mmtk,
                 WorkBucketStage::AuxiliaryTPinningClosure,
-                ProcessPinningRoots::<VM, PT, AT>::new(
+                ProcessPinningRoots::<VM, AT, AT>::new(
                     nodes,
                     WorkBucketStage::AuxiliaryTPinningClosure,
                 ),
