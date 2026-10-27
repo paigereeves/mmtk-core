@@ -70,7 +70,6 @@ impl<VM: VMBinding> GCWork<VM> for AfterPrepare {
         }
         #[cfg(feature = "aux_trace")]
         mmtk.reference_processors.set_allow_new_candidates(false);
-        mmtk.clear_dist_hist();
     }
 }
 
@@ -87,7 +86,7 @@ pub struct AfterAuxClosure {}
 impl<VM: VMBinding> GCWork<VM> for AfterAuxClosure {
     fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
         #[cfg(feature = "histogram_aux")]
-        if !mmtk.get_plan().is_nursery_gc() {
+        if !crate::plan::is_nursery_gc(mmtk.get_plan()) {
             mmtk.print_histograms();
         }
         #[cfg(feature = "histogram_real")]
@@ -102,10 +101,6 @@ impl<VM: VMBinding> GCWork<VM> for AfterAuxClosure {
 
         #[cfg(feature = "aux_trace")]
         mmtk.reference_processors.set_allow_new_candidates(true);
-
-        if !crate::plan::is_nursery_gc(mmtk.get_plan()) {
-            mmtk.print_dist_hist();
-        }
     }
 }
 
