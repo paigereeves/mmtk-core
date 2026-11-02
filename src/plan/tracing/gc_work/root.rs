@@ -71,7 +71,7 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>, AT: Trace<VM = VM>>
             ProcessSlots::<DT>::new(slots.clone().into(), WorkBucketStage::Closure),
         );
         #[cfg(feature = "aux_trace")]
-        if !self.mmtk.scheduler.work_buckets[WorkBucketStage::Closure].is_open() {
+        if self.should_aux_trace(WorkBucketStage::Closure) {
             crate::memory_manager::add_work_packet(
                 self.mmtk,
                 WorkBucketStage::AuxiliaryClosure,
@@ -98,7 +98,7 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>, AT: Trace<VM = VM>>
             ProcessPinningRoots::<VM, PT, DT>::new(nodes.clone(), WorkBucketStage::Closure),
         );
         #[cfg(feature = "aux_trace")]
-        if !self.mmtk.scheduler.work_buckets[WorkBucketStage::Closure].is_open() {
+        if self.should_aux_trace(WorkBucketStage::Closure) {
             crate::memory_manager::add_work_packet(
                 self.mmtk,
                 WorkBucketStage::AuxiliaryPinningRootsTrace,
@@ -123,7 +123,7 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>, AT: Trace<VM = VM>>
             ProcessPinningRoots::<VM, PT, PT>::new(nodes.clone(), WorkBucketStage::TPinningClosure),
         );
         #[cfg(feature = "aux_trace")]
-        if !self.mmtk.scheduler.work_buckets[WorkBucketStage::TPinningClosure].is_open() {
+        if self.should_aux_trace(WorkBucketStage::TPinningClosure) {
             crate::memory_manager::add_work_packet(
                 self.mmtk,
                 WorkBucketStage::AuxiliaryTPinningClosure,
@@ -144,6 +144,13 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>, AT: Trace<VM = VM>>
             mmtk,
             phantom: PhantomData,
         }
+    }
+
+    /// The aux trace only runs in full-heap GCs, and only for roots reported before `stage` opens.
+    #[cfg(feature = "aux_trace")]
+    fn should_aux_trace(&self, stage: WorkBucketStage) -> bool {
+        !crate::plan::is_nursery_gc(self.mmtk.get_plan())
+            && !self.mmtk.scheduler.work_buckets[stage].is_open()
     }
 }
 

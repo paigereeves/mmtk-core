@@ -171,10 +171,6 @@ pub trait Plan: 'static + HasSpaces + Sync + Downcast {
     /// Schedule work for the upcoming GC.
     fn schedule_collection(&'static self, _scheduler: &GCWorkScheduler<Self::VM>);
 
-    fn is_nursery_gc(&self) -> bool {
-        false
-    }
-
     /// Get the common plan. CommonPlan is included by most of MMTk GC plans.
     fn common(&self) -> &CommonPlan<Self::VM> {
         panic!("Common Plan not handled!")

@@ -53,13 +53,15 @@ pub struct AfterPrepare {}
 impl<VM: VMBinding> GCWork<VM> for AfterPrepare {
     fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
         #[cfg(feature = "perf_aux_closure")]
-        if !mmtk.get_plan().is_nursery_gc() {
+        if !crate::plan::is_nursery_gc(mmtk.get_plan()) {
             mmtk.stats.perf_ctrl_enable();
         }
         #[cfg(all(not(feature = "aux_trace"), feature = "perf_closure"))]
-        if !mmtk.get_plan().is_nursery_gc() {
+        if !crate::plan::is_nursery_gc(mmtk.get_plan()) {
             mmtk.stats.perf_ctrl_enable();
         }
+        #[cfg(feature = "aux_trace")]
+        mmtk.reference_processors.set_allow_new_candidates(false);
     }
 }
 
@@ -78,9 +80,11 @@ impl<VM: VMBinding> GCWork<VM> for AfterAuxClosure {
         #[cfg(feature = "perf_aux_closure")]
         mmtk.stats.perf_ctrl_disable();
         #[cfg(feature = "perf_closure")]
-        if !mmtk.get_plan().is_nursery_gc() {
+        if !crate::plan::is_nursery_gc(mmtk.get_plan()) {
             mmtk.stats.perf_ctrl_enable();
         }
+        #[cfg(feature = "aux_trace")]
+        mmtk.reference_processors.set_allow_new_candidates(true);
     }
 }
 

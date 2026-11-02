@@ -14,9 +14,6 @@ impl<VM: VMBinding> crate::scheduler::GCWorkContext for GenImmixNurseryGCWorkCon
     type PlanType = GenImmix<VM>;
     type DefaultTrace = GenNurseryTrace<VM, Self::PlanType, DEFAULT_TRACE>;
     type PinningTrace = UnsupportedTrace<VM>;
-    #[cfg(feature = "aux_trace")]
-    type AuxiliaryTrace = PlanTrace<GenImmix<VM>, TRACE_KIND_AUX>;
-    #[cfg(not(feature = "aux_trace"))]
     type AuxiliaryTrace = UnsupportedTrace<VM>;
 }
 

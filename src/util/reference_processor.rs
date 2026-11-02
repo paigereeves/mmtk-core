@@ -112,6 +112,16 @@ impl ReferenceProcessors {
     pub fn scan_phantom_refs<VM: VMBinding>(&self, mmtk: &'static MMTK<VM>) {
         self.phantom.scan::<VM>(is_nursery_gc(mmtk.get_plan()));
     }
+
+    pub(crate) fn set_allow_new_candidates(&self, allow: bool) {
+        for p in [&self.soft, &self.weak, &self.phantom] {
+            if allow {
+                p.allow_new_candidate()
+            } else {
+                p.disallow_new_candidate()
+            }
+        }
+    }
 }
 
 impl Default for ReferenceProcessors {
