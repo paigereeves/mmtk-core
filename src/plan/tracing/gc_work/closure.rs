@@ -15,6 +15,77 @@ use crate::{
 };
 use std::sync::Mutex;
 
+/// The type of `object` as a Java-style name (`java.lang.String`, `[B`), from the VM's type
+/// descriptor.
+#[cfg(any(feature = "histogram_aux", feature = "histogram_real"))]
+fn type_name<VM: VMBinding>(object: ObjectReference) -> String {
+    use crate::vm::ObjectModel;
+    crate::mmtk::type_descriptor_to_name(VM::VMObjectModel::get_type_descriptor(object))
+}
+
+/// Per-packet slot type counts, or `None` if the auxiliary trace is not running. Checked once
+/// when the packet starts: no packet runs across the `AfterPrepare` or `AfterAuxClosure`
+/// sentinels, so a packet is either wholly inside the auxiliary trace or wholly outside it.
+#[cfg(feature = "slot_types")]
+fn new_slot_type_counts<VM: VMBinding>(mmtk: &MMTK<VM>) -> Option<crate::mmtk::SlotTypeCounts> {
+    mmtk.slot_types_active()
+        .then(crate::mmtk::SlotTypeCounts::new)
+}
+
+/// Count one slot load in `counts`, keyed by the type of the loaded object (`None` for null).
+#[cfg(feature = "slot_types")]
+fn count_slot_type<VM: VMBinding>(
+    counts: &mut Option<crate::mmtk::SlotTypeCounts>,
+    obj: Option<ObjectReference>,
+) {
+    use crate::vm::ObjectModel;
+    if let Some(counts) = counts {
+        let ty = obj.map(VM::VMObjectModel::get_type_descriptor);
+        *counts.entry(ty).or_insert(0) += 1;
+    }
+}
+
+/// Per-packet slot holder counts, or `None` if the auxiliary trace is not running. See
+/// `new_slot_type_counts`.
+#[cfg(feature = "slot_types")]
+fn new_slot_holder_counts<VM: VMBinding>(mmtk: &MMTK<VM>) -> Option<crate::mmtk::SlotHolderCounts> {
+    mmtk.slot_types_active()
+        .then(crate::mmtk::SlotHolderCounts::new)
+}
+
+/// If `slot` of the scanned object `holder` points to a watched type (`HOLDER_TARGET_TYPES`),
+/// count it in `counts` under (target type, holder type).
+#[cfg(feature = "slot_types")]
+fn count_slot_holder<VM: VMBinding>(
+    counts: &mut Option<crate::mmtk::SlotHolderCounts>,
+    holder: ObjectReference,
+    slot: VM::VMSlot,
+) {
+    use crate::vm::ObjectModel;
+    if let Some(counts) = counts {
+        if let Some(target) = slot.load() {
+            let target_ty = VM::VMObjectModel::get_type_descriptor(target);
+            if crate::mmtk::is_holder_target(target_ty) {
+                let holder_ty = VM::VMObjectModel::get_type_descriptor(holder);
+                *counts.entry((target_ty, holder_ty)).or_insert(0) += 1;
+            }
+        }
+    }
+}
+
+/// Log the object about to be scanned, in the same format as the G1 `gc+marking=trace`
+/// "Scanning object" log.
+#[cfg(any(feature = "histogram_aux", feature = "histogram_real"))]
+fn log_scanning_object<VM: VMBinding>(object: ObjectReference) {
+    if log_enabled!(log::Level::Trace) {
+        trace!(
+            "Scanning object {:#018x} type {}",
+            object.to_object_start::<VM>().as_usize(),
+            type_name::<VM>(object)
+        );
+    }
+}
+
 pub struct AfterVMRefClosure<T: Trace> {
     phantom_data: PhantomData<T>,
 }
@@ -60,6 +131,8 @@ impl<VM: VMBinding> GCWork<VM> for AfterPrepare {
     fn do_work(&mut self, _worker: &mut GCWorker<VM>, mmtk: &'static MMTK<VM>) {
         #[cfg(any(feature = "histogram_aux", feature = "histogram_real"))]
         mmtk.clear_histograms();
+        #[cfg(feature = "slot_types")]
+        mmtk.start_slot_types();
         #[cfg(feature = "perf_aux_closure")]
         if !crate::plan::is_nursery_gc(mmtk.get_plan()) {
             mmtk.stats.perf_ctrl_enable();
@@ -91,6 +164,11 @@ impl<VM: VMBinding> GCWork<VM> for AfterAuxClosure {
         }
         #[cfg(feature = "histogram_real")]
         mmtk.clear_histograms();
+        #[cfg(feature = "slot_types")]
+        {
+            mmtk.stop_slot_types();
+            mmtk.print_and_reset_slot_types();
+        }
         #[cfg(feature = "perf_aux_closure")]
         mmtk.stats.perf_ctrl_disable();
 
@@ -124,6 +202,10 @@ pub struct ProcessSlots<T: Trace> {
     slots: VecDeque<SlotOfTrace<T>>,
     pushes: u32,
     bucket: WorkBucketStage,
+    /// If this packet was created from roots, the kind of root (see
+    /// `RootsWorkFactory::set_root_label`). Packets split off later have no label.
+    #[cfg(feature = "slot_types")]
+    root_label: Option<&'static str>,
 }
 
 impl<T: Trace> ProcessSlots<T> {
@@ -139,6 +221,40 @@ impl<T: Trace> ProcessSlots<T> {
             slots,
             pushes: 0,
             bucket,
+            #[cfg(feature = "slot_types")]
+            root_label: None,
+        }
+    }
+
+    /// Mark this packet's slots as roots of the kind `label`.
+    #[cfg(feature = "slot_types")]
+    pub(crate) fn set_root_label(&mut self, label: &'static str) {
+        self.root_label = Some(label);
+    }
+
+    /// If this is a root packet, count its slots that point to watched types with the root label
+    /// as the holder. Must run before tracing starts, while `self.slots` still holds
+    /// only the root slots.
+    #[cfg(feature = "slot_types")]
+    fn count_root_holders(&self, mmtk: &MMTK<T::VM>) {
+        use crate::vm::ObjectModel;
+        let Some(label) = self.root_label else {
+            return;
+        };
+        let Some(mut counts) = new_slot_holder_counts(mmtk) else {
+            return;
+        };
+        let holder = crate::mmtk::root_label_descriptor(label);
+        for slot in self.slots.iter() {
+            if let Some(target) = slot.load() {
+                let target_ty = <T::VM as VMBinding>::VMObjectModel::get_type_descriptor(target);
+                if crate::mmtk::is_holder_target(target_ty) {
+                    *counts.entry((target_ty, holder)).or_insert(0) += 1;
+                }
+            }
+        }
+        if !counts.is_empty() {
+            mmtk.record_slot_holders(counts);
         }
     }
 
@@ -149,9 +265,14 @@ impl<T: Trace> ProcessSlots<T> {
         trace: T,
     ) -> VectorQueue<ObjectReference> {
         let mut queue = VectorObjectQueue::new();
+        #[cfg(feature = "slot_types")]
+        let mut slot_types = new_slot_type_counts(worker.mmtk);
 
         for slot in self.slots.iter() {
-            if let Some(object) = slot.load() {
+            let obj = slot.load();
+            #[cfg(feature = "slot_types")]
+            count_slot_type::<T::VM>(&mut slot_types, obj);
+            if let Some(object) = obj {
                 let new_object = trace.trace_object(worker, object, &mut queue);
                 if T::may_move_objects() && new_object != object {
                     slot.store(new_object);
@@ -159,6 +280,10 @@ impl<T: Trace> ProcessSlots<T> {
             }
         }
 
+        #[cfg(feature = "slot_types")]
+        if let Some(slot_types) = slot_types {
+            worker.mmtk.record_slot_types(slot_types);
+        }
         queue
     }
 
@@ -180,16 +305,17 @@ impl<T: Trace> ProcessSlots<T> {
         self.slots.push_back(slot);
     }
 
+    /// Add one to the bucket of `dist_hist` for the log2 distance from `slot` to `obj`, and
+    /// return that bucket.
     fn record_ref_dist(
         &mut self,
         slot: <<T as Trace>::VM as VMBinding>::VMSlot,
         obj: Option<ObjectReference>,
         dist_hist: &Mutex<[u64; NUM_BUCKETS]>,
-    ) {
+    ) -> usize {
         let mut dist_hist = dist_hist.lock().unwrap();
+        let bucket;
         if let Some(obj) = obj {
-            debug!("slot_addr: {}", slot.addr());
-            debug!("obj_addr: {}", obj);
             let obj_addr = obj.to_object_start::<<T as Trace>::VM>().as_usize() as i128;
             let slot_addr = slot.addr().as_usize() as i128;
             assert!(obj_addr != slot_addr);
@@ -197,34 +323,67 @@ impl<T: Trace> ProcessSlots<T> {
             if obj_addr > slot_addr {
                 // slot points forward
                 let dist = obj_addr - slot_addr;
-                debug!("dist: {}", dist);
                 let log = dist.ilog2();
-                debug!("log: {}", log);
                 if log > 34 {
                     // out of bounds
-                    debug!("ob");
-                    dist_hist[OB_BUCKET] += 1;
+                    bucket = OB_BUCKET;
                 } else {
-                    debug!("bucket: {}", log as usize + 35);
-                    dist_hist[log as usize + 35] += 1;
+                    bucket = log as usize + 35;
                 }
             } else {
                 let dist = slot_addr - obj_addr;
-                debug!("dist: {}", dist);
                 let log = dist.ilog2();
-                debug!("log: {}", log);
                 if log > 34 {
                     // out of bounds
-                    debug!("ob");
-                    dist_hist[OB_BUCKET] += 1;
+                    bucket = OB_BUCKET;
                 } else {
-                    debug!("bucket: {}", 34 - log as usize);
-                    dist_hist[34 - log as usize] += 1;
+                    bucket = 34 - log as usize;
                 }
             }
         } else {
-            dist_hist[NULL_BUCKET] += 1;
+            bucket = NULL_BUCKET;
         }
+        dist_hist[bucket] += 1;
+        bucket
+    }
+
+    /// Log one recorded slot, in the same format as the G1 `gc+marking=trace` "Ref dist" log.
+    #[cfg(any(feature = "histogram_aux", feature = "histogram_real"))]
+    fn log_ref_dist(
+        slot: <<T as Trace>::VM as VMBinding>::VMSlot,
+        obj: Option<ObjectReference>,
+        bucket: usize,
+        trace: &T,
+    ) {
+        if !log_enabled!(log::Level::Trace) {
+            return;
+        }
+        let slot_addr = slot.addr().as_usize();
+        let (obj_addr, type_name, distance, marked) = match obj {
+            Some(o) => {
+                let obj_addr = o.to_object_start::<T::VM>().as_usize();
+                #[cfg(feature = "histogram_aux")]
+                let marked = trace.obj_is_aux_marked(o);
+                #[cfg(not(feature = "histogram_aux"))]
+                let marked = trace.obj_is_marked(o);
+                (
+                    obj_addr,
+                    type_name::<T::VM>(o),
+                    obj_addr as i128 - slot_addr as i128,
+                    marked,
+                )
+            }
+            None => (0, "null".to_string(), 0, false),
+        };
+        trace!(
+            "Ref dist: slot {:#018x} -> {:#018x} type {} distance {} bucket {} marked {}",
+            slot_addr,
+            obj_addr,
+            type_name,
+            distance,
+            bucket,
+            marked
+        );
     }
 
     #[cfg(feature = "edge_enqueueing")]
@@ -236,10 +395,19 @@ impl<T: Trace> ProcessSlots<T> {
         unmarked_slots_histogram: &Mutex<[u64; NUM_BUCKETS]>,
     ) {
         let tls = worker.tls;
+        #[cfg(feature = "slot_types")]
+        let mut slot_types = new_slot_type_counts(worker.mmtk);
+        #[cfg(feature = "slot_types")]
+        let mut slot_holders = new_slot_holder_counts(worker.mmtk);
         while let Some(slot) = self.pop_slot() {
             let obj = slot.load();
+            #[cfg(feature = "slot_types")]
+            count_slot_type::<T::VM>(&mut slot_types, obj);
             #[cfg(any(feature = "histogram_aux", feature = "histogram_real"))]
-            self.record_ref_dist(slot, obj, all_slots_histogram);
+            {
+                let bucket = self.record_ref_dist(slot, obj, all_slots_histogram);
+                Self::log_ref_dist(slot, obj, bucket, &trace);
+            }
             if let Some(object) = obj {
                 #[cfg(feature = "histogram_aux")]
                 if !trace.obj_is_aux_marked(object) {
@@ -257,7 +425,11 @@ impl<T: Trace> ProcessSlots<T> {
                         ),
                         "Object {enqueued_object} does not support slot enqueuing."
                     );
+                    #[cfg(any(feature = "histogram_aux", feature = "histogram_real"))]
+                    log_scanning_object::<T::VM>(enqueued_object);
                     let mut closure = |slot: SlotOfTrace<T>| {
+                        #[cfg(feature = "slot_types")]
+                        count_slot_holder::<T::VM>(&mut slot_holders, enqueued_object, slot);
                         self.push_slot(slot);
                         self.pushes += 1;
                     };
@@ -278,6 +450,14 @@ impl<T: Trace> ProcessSlots<T> {
                     slot.store(new_object);
                 }
             }
+        }
+        #[cfg(feature = "slot_types")]
+        if let Some(slot_types) = slot_types {
+            worker.mmtk.record_slot_types(slot_types);
+        }
+        #[cfg(feature = "slot_types")]
+        if let Some(slot_holders) = slot_holders {
+            worker.mmtk.record_slot_holders(slot_holders);
         }
     }
 
@@ -321,6 +501,9 @@ impl<T: Trace> GCWork<T::VM> for ProcessSlots<T> {
         probe!(mmtk, process_slots, self.slots.len());
 
         let trace = T::from_mmtk(mmtk);
+
+        #[cfg(feature = "slot_types")]
+        self.count_root_holders(mmtk);
 
         #[cfg(feature = "extreme_assertions")]
         if crate::util::slot_logger::should_check_duplicate_slots(mmtk.get_plan()) {
@@ -378,6 +561,8 @@ impl<T: Trace> ProcessNodes<T> {
         let mut scan_later = Vec::new();
 
         let mut slots = VectorQueue::new();
+        #[cfg(feature = "slot_types")]
+        let mut slot_holders = new_slot_holder_counts(worker.mmtk);
 
         let flush = |slots: &mut VectorQueue<_>, worker: &mut GCWorker<T::VM>| {
             let buffer = slots.take();
@@ -404,8 +589,12 @@ impl<T: Trace> ProcessNodes<T> {
         for object in self.objects.iter().copied() {
             if <T::VM as VMBinding>::VMScanning::support_slot_enqueuing(tls, object) {
                 trace!("Scan object (slot) {}", object);
+                #[cfg(any(feature = "histogram_aux", feature = "histogram_real"))]
+                log_scanning_object::<T::VM>(object);
                 // If an object supports slot-enqueuing, we enqueue its slots.
                 <T::VM as VMBinding>::VMScanning::scan_object(tls, object, &mut |slot| {
+                    #[cfg(feature = "slot_types")]
+                    count_slot_holder::<T::VM>(&mut slot_holders, object, slot);
                     slots.push(slot);
                     if slots.is_full() {
                         flush(&mut slots, worker);
@@ -425,6 +614,11 @@ impl<T: Trace> ProcessNodes<T> {
 
         if !slots.is_empty() {
             flush(&mut slots, worker);
+        }
+
+        #[cfg(feature = "slot_types")]
+        if let Some(slot_holders) = slot_holders {
+            worker.mmtk.record_slot_holders(slot_holders);
         }
 
         scan_later

@@ -134,6 +134,12 @@ pub trait RootsWorkFactory<SL: Slot>: Clone + Send + 'static {
     /// Arguments:
     /// * `nodes`: A vector of references to objects pointed by edges from roots.
     fn create_process_tpinning_roots_work(&mut self, nodes: Vec<ObjectReference>);
+
+    /// Debugging aid: label the roots this factory reports from now on with the kind of root
+    /// (e.g. "<root: thread stacks>"), so that the `slot_types` feature can attribute root slots
+    /// by kind. The label is printed as is, except that '/' prints as '.'. The default does
+    /// nothing.
+    fn set_root_label(&mut self, _label: &'static str) {}
 }
 
 /// For USDT tracepoints for roots.

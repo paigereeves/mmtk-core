@@ -30,6 +30,8 @@ pub(crate) struct DefaultRootsWorkFactory<
     AT: Trace<VM = VM>,
 > {
     pub(crate) mmtk: &'static MMTK<VM>,
+    /// Kind of root being reported, set by the binding with `set_root_label`.
+    root_label: &'static str,
     phantom: PhantomData<(DT, PT, AT)>,
 }
 
@@ -39,6 +41,7 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>, AT: Trace<VM = VM>> 
     fn clone(&self) -> Self {
         Self {
             mmtk: self.mmtk,
+            root_label: self.root_label,
             phantom: PhantomData,
         }
     }
@@ -72,12 +75,20 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>, AT: Trace<VM = VM>>
         );
         #[cfg(feature = "aux_trace")]
         if self.should_aux_trace(WorkBucketStage::Closure) {
+            #[allow(unused_mut)]
+            let mut work = ProcessSlots::<AT>::new(slots.into(), WorkBucketStage::AuxiliaryClosure);
+            #[cfg(feature = "slot_types")]
+            work.set_root_label(self.root_label);
             crate::memory_manager::add_work_packet(
                 self.mmtk,
                 WorkBucketStage::AuxiliaryClosure,
-                ProcessSlots::<AT>::new(slots.into(), WorkBucketStage::AuxiliaryClosure),
+                work,
             );
         }
+    }
+
+    fn set_root_label(&mut self, label: &'static str) {
+        self.root_label = label;
     }
 
     fn create_process_pinning_roots_work(&mut self, nodes: Vec<ObjectReference>) {
@@ -142,6 +153,7 @@ impl<VM: VMBinding, DT: Trace<VM = VM>, PT: Trace<VM = VM>, AT: Trace<VM = VM>>
     pub(crate) fn new(mmtk: &'static MMTK<VM>) -> Self {
         Self {
             mmtk,
+            root_label: "<root: unlabelled>",
             phantom: PhantomData,
         }
     }

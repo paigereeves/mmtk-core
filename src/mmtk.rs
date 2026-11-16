@@ -121,6 +121,59 @@ pub const OB_BUCKET: usize = 71;
 const PRINT_DIST_HIST_TO_FILE: bool = false;
 const DIST_HIST_DIR: &str = "output";
 const DIST_HIST_PATH: &str = "output/refdist.txt";
+
+/// Number of slot loads per type of the loaded object, keyed by the VM's type descriptor.
+/// `None` counts slots that held null.
+#[cfg(feature = "slot_types")]
+pub type SlotTypeCounts = HashMap<Option<&'static [i8]>, u64>;
+
+/// Type descriptors of the objects whose holders are counted: for each slot that points to one
+/// of these, the type of the object containing the slot is recorded. Edit to change what is
+/// watched.
+#[cfg(feature = "slot_types")]
+const HOLDER_TARGET_TYPES: &[&str] = &[
+    "water/Futures",
+    "water/RPC",
+    // The MRTasks that hold most of the water.Futures slots before the ~60 s drop.
+    "hex/tree/drf/DRF$DRFDriver$CollectPreds",
+    "water/fvec/RollupStats$Roll",
+    "hex/tree/Score",
+    "hex/tree/Sample",
+];
+
+/// Number of slots per (target type, holder type), for targets in `HOLDER_TARGET_TYPES`.
+#[cfg(feature = "slot_types")]
+pub type SlotHolderCounts = HashMap<(&'static [i8], &'static [i8]), u64>;
+
+/// Whether `desc` is one of `HOLDER_TARGET_TYPES`.
+#[cfg(feature = "slot_types")]
+pub(crate) fn is_holder_target(desc: &[i8]) -> bool {
+    HOLDER_TARGET_TYPES
+        .iter()
+        .any(|t| t.len() == desc.len() && t.bytes().zip(desc).all(|(a, &b)| a == b as u8))
+}
+
+/// A root label (`RootsWorkFactory::set_root_label`) as a "type descriptor", so root kinds can
+/// be counted as holders alongside object types. The label is printed as is.
+#[cfg(feature = "slot_types")]
+pub(crate) fn root_label_descriptor(label: &'static str) -> &'static [i8] {
+    // SAFETY: u8 and i8 have the same layout.
+    unsafe { std::slice::from_raw_parts(label.as_ptr() as *const i8, label.len()) }
+}
+
+/// Turn a VM type descriptor into a Java-style name (`java.lang.String`, `[B`).
+#[cfg(any(
+    feature = "histogram_aux",
+    feature = "histogram_real",
+    feature = "slot_types"
+))]
+pub(crate) fn type_descriptor_to_name(desc: &[i8]) -> String {
+    let bytes: Vec<u8> = desc
+        .iter()
+        .map(|&b| if b as u8 == b'/' { b'.' } else { b as u8 })
+        .collect();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
 /// An MMTk instance. MMTk allows multiple instances to run independently, and each instance gives users a separate heap.
 /// *Note that multi-instances is not fully supported yet*
 pub struct MMTK<VM: VMBinding> {
@@ -139,6 +192,14 @@ pub struct MMTK<VM: VMBinding> {
     pub(crate) stats: Arc<Stats>,
     pub(crate) all_slots_histogram: Mutex<[u64; NUM_BUCKETS]>,
     pub(crate) unmarked_slots_histogram: Mutex<[u64; NUM_BUCKETS]>,
+    #[cfg(feature = "slot_types")]
+    slot_types: Mutex<SlotTypeCounts>,
+    #[cfg(feature = "slot_types")]
+    slot_holders: Mutex<SlotHolderCounts>,
+    /// True between the `AfterPrepare` and `AfterAuxClosure` sentinels, i.e. during the
+    /// auxiliary trace, which is the only trace whose slot loads are counted.
+    #[cfg(feature = "slot_types")]
+    slot_types_active: std::sync::atomic::AtomicBool,
     start_time: Instant,
     /// Number of GCs whose dist hist has been recorded.
     recorded_gc_count: AtomicUsize,
@@ -267,6 +328,12 @@ impl<VM: VMBinding> MMTK<VM> {
             stats,
             all_slots_histogram: Mutex::new([0; 72]),
             unmarked_slots_histogram: Mutex::new([0; 72]),
+            #[cfg(feature = "slot_types")]
+            slot_types: Mutex::new(HashMap::new()),
+            #[cfg(feature = "slot_types")]
+            slot_holders: Mutex::new(HashMap::new()),
+            #[cfg(feature = "slot_types")]
+            slot_types_active: std::sync::atomic::AtomicBool::new(false),
             start_time: Instant::now(),
             recorded_gc_count: AtomicUsize::new(0),
         }
@@ -278,9 +345,10 @@ impl<VM: VMBinding> MMTK<VM> {
         let recorded = self.recorded_gc_count.fetch_add(1, Ordering::SeqCst) + 1;
         writeln!(
             out,
-            "Slot - object distance histogram (GC {}, recorded GC {}, {} microseconds since start):",
+            "Slot - object distance histogram (GC {}, recorded GC {}, emergency {}, {} microseconds since start):",
             self.stats.get_gc_count(),
             recorded,
+            self.is_emergency_collection(),
             self.start_time.elapsed().as_micros()
         )
         .unwrap();
@@ -314,6 +382,21 @@ impl<VM: VMBinding> MMTK<VM> {
             unmarked_slots_histogram[OB_BUCKET]
         )
         .unwrap();
+        // Totals over every bucket, including null and out of bounds.
+        let all_total = all_slots_histogram.iter().sum::<u64>();
+        writeln!(out, "total slots (all): {all_total}").unwrap();
+        writeln!(
+            out,
+            "non-null slots (all): {}",
+            all_total - all_slots_histogram[NULL_BUCKET]
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "total slots (unmarked): {}",
+            unmarked_slots_histogram.iter().sum::<u64>()
+        )
+        .unwrap();
 
         if PRINT_DIST_HIST_TO_FILE {
             fs::OpenOptions::new()
@@ -325,6 +408,109 @@ impl<VM: VMBinding> MMTK<VM> {
         } else {
             print!("{out}");
         }
+    }
+
+    /// Reset the slot type counts and start counting. Called when the auxiliary trace starts.
+    #[cfg(feature = "slot_types")]
+    pub(crate) fn start_slot_types(&self) {
+        self.slot_types.lock().unwrap().clear();
+        self.slot_holders.lock().unwrap().clear();
+        self.slot_types_active.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether slot loads are being counted, i.e. whether the auxiliary trace is running.
+    #[cfg(feature = "slot_types")]
+    pub(crate) fn slot_types_active(&self) -> bool {
+        self.slot_types_active.load(Ordering::SeqCst)
+    }
+
+    /// Stop counting slot loads. Called when the auxiliary trace ends.
+    #[cfg(feature = "slot_types")]
+    pub(crate) fn stop_slot_types(&self) {
+        self.slot_types_active.store(false, Ordering::SeqCst);
+    }
+
+    /// Add the slot type counts of one work packet to the counts for this auxiliary trace.
+    #[cfg(feature = "slot_types")]
+    pub(crate) fn record_slot_types(&self, counts: SlotTypeCounts) {
+        let mut slot_types = self.slot_types.lock().unwrap();
+        for (ty, n) in counts {
+            *slot_types.entry(ty).or_insert(0) += n;
+        }
+    }
+
+    /// Add the slot holder counts of one work packet to the counts for this auxiliary trace.
+    #[cfg(feature = "slot_types")]
+    pub(crate) fn record_slot_holders(&self, counts: SlotHolderCounts) {
+        let mut slot_holders = self.slot_holders.lock().unwrap();
+        for (key, n) in counts {
+            *slot_holders.entry(key).or_insert(0) += n;
+        }
+    }
+
+    /// Print the slot type counts for this auxiliary trace, highest count first, then the holders
+    /// of slots to `HOLDER_TARGET_TYPES`, then reset them.
+    #[cfg(feature = "slot_types")]
+    pub(crate) fn print_and_reset_slot_types(&self) {
+        use crate::vm::ActivePlan;
+        let counts = std::mem::take(&mut *self.slot_types.lock().unwrap());
+        let holders = std::mem::take(&mut *self.slot_holders.lock().unwrap());
+        let total: u64 = counts.values().sum();
+        let non_null = total - counts.get(&None).copied().unwrap_or(0);
+        let mut counts: Vec<_> = counts.into_iter().collect();
+        counts.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+
+        // Build the whole table first so it is emitted in one go.
+        let mut out = String::new();
+        writeln!(
+            out,
+            "Loaded slot types, auxiliary trace (GC {}, emergency {}, user_triggered {}, mutators {}, {} microseconds since start):",
+            self.stats.get_gc_count(),
+            self.is_emergency_collection(),
+            self.is_user_triggered_collection(),
+            VM::VMActivePlan::number_of_mutators(),
+            self.start_time.elapsed().as_micros()
+        )
+        .unwrap();
+        for (ty, n) in counts.iter() {
+            let name = ty.map_or_else(|| "null".to_string(), type_descriptor_to_name);
+            writeln!(out, "{n:>12} {name}").unwrap();
+        }
+        writeln!(out, "total loaded slots: {total}").unwrap();
+        writeln!(out, "non-null loaded slots: {non_null}").unwrap();
+
+        // For each watched type: the types of the scanned objects holding slots to it, and the
+        // labelled root kinds ("<root: ...>"). Loaded slots that nothing accounts for are held by
+        // pinning roots or by objects scanned with `scan_object_and_trace_edges`.
+        for (target, target_total) in counts
+            .iter()
+            .filter_map(|(ty, n)| ty.filter(|t| is_holder_target(t)).map(|t| (t, *n)))
+        {
+            let mut by_holder: Vec<_> = holders
+                .iter()
+                .filter(|((t, _), _)| *t == target)
+                .map(|((_, h), n)| (*h, *n))
+                .collect();
+            by_holder.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+            let attributed: u64 = by_holder.iter().map(|(_, n)| n).sum();
+            writeln!(
+                out,
+                "holders of {} ({} slots):",
+                type_descriptor_to_name(target),
+                target_total
+            )
+            .unwrap();
+            for (holder, n) in by_holder {
+                writeln!(out, "{n:>12} {}", type_descriptor_to_name(holder)).unwrap();
+            }
+            writeln!(
+                out,
+                "{:>12} (unattributed)",
+                target_total.saturating_sub(attributed)
+            )
+            .unwrap();
+        }
+        print!("{out}");
     }
 
     pub fn clear_histograms(&self) {
