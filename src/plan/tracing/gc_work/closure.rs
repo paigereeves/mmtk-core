@@ -132,6 +132,8 @@ impl<T: Trace> ProcessSlots<T> {
         worker: &mut GCWorker<T::VM>,
         trace: T,
     ) -> VectorQueue<ObjectReference> {
+        use crate::plan::VectorObjectQueue;
+
         let mut queue = VectorObjectQueue::new();
 
         for slot in self.slots.iter() {
