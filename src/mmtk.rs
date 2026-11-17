@@ -114,9 +114,8 @@ impl Default for MMTKBuilder {
     }
 }
 
-pub const NUM_BUCKETS: usize = 72;
+pub const NUM_BUCKETS: usize = 71;
 pub const NULL_BUCKET: usize = 70;
-pub const OB_BUCKET: usize = 71;
 /// Write the dist hist to `DIST_HIST_PATH` if true, otherwise to stdout.
 const PRINT_DIST_HIST_TO_FILE: bool = false;
 const DIST_HIST_DIR: &str = "output";
@@ -264,8 +263,8 @@ impl<VM: VMBinding> MMTK<VM> {
             analysis_manager: Arc::new(AnalysisManager::new(stats.clone())),
             gc_trigger,
             stats,
-            all_slots_histogram: Mutex::new([0; 72]),
-            unmarked_slots_histogram: Mutex::new([0; 72]),
+            all_slots_histogram: Mutex::new([0; NUM_BUCKETS]),
+            unmarked_slots_histogram: Mutex::new([0; NUM_BUCKETS]),
             start_time: Instant::now(),
             recorded_gc_count: AtomicUsize::new(0),
         }
@@ -301,18 +300,6 @@ impl<VM: VMBinding> MMTK<VM> {
             all_slots_histogram[NULL_BUCKET]
         )
         .unwrap();
-        writeln!(
-            out,
-            "out of bounds references (all): {}",
-            all_slots_histogram[OB_BUCKET]
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "out of bounds references (unmarked): {}",
-            unmarked_slots_histogram[OB_BUCKET]
-        )
-        .unwrap();
 
         if PRINT_DIST_HIST_TO_FILE {
             fs::OpenOptions::new()
@@ -328,11 +315,11 @@ impl<VM: VMBinding> MMTK<VM> {
 
     pub fn clear_histograms(&self) {
         let mut unmarked = self.unmarked_slots_histogram.lock().unwrap();
-        for i in 0..72 {
+        for i in 0..NUM_BUCKETS {
             unmarked[i] = 0;
         }
         let mut all = self.all_slots_histogram.lock().unwrap();
-        for i in 0..72 {
+        for i in 0..NUM_BUCKETS {
             all[i] = 0;
         }
     }

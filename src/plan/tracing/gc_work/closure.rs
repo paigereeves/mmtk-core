@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 use crate::{
-    mmtk::{NULL_BUCKET, NUM_BUCKETS, OB_BUCKET},
+    mmtk::{NULL_BUCKET, NUM_BUCKETS},
     plan::{
         tracing::{gc_work::DefaultObjectTracerContext, SlotOfTrace, Trace},
         VectorQueue,
@@ -200,29 +200,25 @@ impl<T: Trace> ProcessSlots<T> {
                 // slot points forward
                 let dist = obj_addr - slot_addr;
                 debug!("dist: {}", dist);
-                let log = dist.ilog2();
+                let mut log = dist.ilog2();
                 debug!("log: {}", log);
                 if log > 34 {
-                    // out of bounds
-                    debug!("ob");
-                    dist_hist[OB_BUCKET] += 1;
-                } else {
-                    debug!("bucket: {}", log as usize + 35);
-                    dist_hist[log as usize + 35] += 1;
+                    debug!("capping log to 34");
+                    log = 34;
                 }
+                debug!("bucket: {}", log as usize + 35);
+                dist_hist[log as usize + 35] += 1;
             } else {
                 let dist = slot_addr - obj_addr;
                 debug!("dist: {}", dist);
-                let log = dist.ilog2();
+                let mut log = dist.ilog2();
                 debug!("log: {}", log);
                 if log > 34 {
-                    // out of bounds
-                    debug!("ob");
-                    dist_hist[OB_BUCKET] += 1;
-                } else {
-                    debug!("bucket: {}", 34 - log as usize);
-                    dist_hist[34 - log as usize] += 1;
+                    debug!("capping log to 34");
+                    log = 34;
                 }
+                debug!("bucket: {}", 34 - log as usize);
+                dist_hist[34 - log as usize] += 1;
             }
         } else {
             dist_hist[NULL_BUCKET] += 1;
